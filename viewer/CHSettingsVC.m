@@ -156,8 +156,15 @@
 }
 
 - (void)switchChanged:(UISwitch *)sw {
-    NSString *k = [(CHSetCell *)sw.superview.superview key];
-    if (k) self.cfg[k] = @(sw.on);
+    // ★ 用 tag 反查行列（原来用 superview.superview 会拿到 contentView 导致崩溃）
+    NSInteger sec = sw.tag / 100;
+    NSInteger row = sw.tag % 100;
+    if (sec < 0 || sec >= (NSInteger)self.sections.count) return;
+    NSArray *rows = self.sections[sec][@"rows"];
+    if (row < 0 || row >= (NSInteger)rows.count) return;
+    NSString *k = rows[row][@"k"];
+    if (k.length == 0) return;
+    self.cfg[k] = @(sw.on);
     [self saveCfg];
 }
 
