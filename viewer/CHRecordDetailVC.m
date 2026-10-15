@@ -159,6 +159,26 @@
     add(@"数据", r[@"data"]);
     add(@"来源", r[@"src"]);
     add(@"调用者", r[@"caller"]);
+
+    // ★ 完整调用栈
+    NSArray *bt = r[@"bt"];
+    if ([bt isKindOfClass:[NSArray class]] && bt.count) {
+        NSMutableString *s = [NSMutableString string];
+        for (NSInteger i = 0; i < (NSInteger)bt.count; i++)
+            [s appendFormat:@"%2ld  %@\n", (long)i, bt[i]];
+        add(@"调用栈 (backtrace)", s);
+    }
+
+    // ★ 聚合历史实例
+    if (self.record.dups.count) {
+        NSMutableString *s = [NSMutableString string];
+        NSDateFormatter *df = [NSDateFormatter new];
+        df.dateFormat = @"HH:mm:ss.SSS";
+        [s appendFormat:@"共出现 %ld 次\n\n", (long)self.record.count];
+        for (CHRecord *d in self.record.dups)
+            [s appendFormat:@"%@\n", [df stringFromDate:d.date]];
+        add(@"历史触发时间", s);
+    }
     add(@"URL", r[@"url"]);
     add(@"方法", r[@"method"]);
     add(@"状态", r[@"status"]);
