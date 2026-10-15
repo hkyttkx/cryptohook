@@ -101,7 +101,7 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
     if (s == 0) return 4;
-    if (s == 1) return 2;
+    if (s == 1) return 3;   // 导出 dylib / 清空日志 / 配置路径
     return 1;
 }
 
@@ -132,6 +132,10 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
         c.selectionStyle = UITableViewCellSelectionStyleNone;
     } else if (ip.section == 1) {
         if (ip.row == 0) {
+            c.textLabel.text = @"导出 CryptoHook.dylib";
+            c.detailTextLabel.text = @"复制到 Documents 并分享（用于注入目标 App）";
+            c.textLabel.textColor = CH_ACCENT;
+        } else if (ip.row == 1) {
             c.textLabel.text = @"清空所有日志";
             c.detailTextLabel.text = @"删除已收集的全部记录";
         } else {
@@ -148,13 +152,71 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
 
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [t deselectRowAtIndexPath:ip animated:YES];
-    if (ip.section != 1 || ip.row != 0) return;
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"清空日志"
-        message:@"删除所有 App 已收集的记录？不可恢复。"
-        preferredStyle:UIAlertControllerStyleAlert];
-    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [al addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
-        handler:^(UIAlertAction *a){ [self clearAll]; }]];
+    if (ip.section != 1) return;
+    if (ip.row == 0) { [self exportDylib]; return; }
+    if (ip.row == 1) {
+        UIAlertController *al = [UIAlertController alertControllerWithTitle:@"清空日志"
+            message:@"删除所有 App 已收集的记录？不可恢复。"
+            preferredStyle:UIAlertControllerStyleAlert];
+        [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        [al addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
+            handler:^(UIAlertAction *a){ [self clearAll]; }]];
+        [self presentViewController:al animated:YES completion:nil];
+    }
+}
+
+#pragma mark - 导出 dylib
+- (void)exportDylib {
+    @try {
+        NSString *src = [[NSBundle mainBundle] pathForResource:@"CryptoHook" ofType:@"dylib"];
+        if (!src) {
+            // 兜底：直接按 bundle 路径拼
+            src = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"CryptoHook.dylib"];
+        }
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:src]) {
+            [self toast:@"包里找不到 CryptoHook.dylib"];
+            return;
+        }
+        // 目标目录（越狱常见可写位置，优先 /var/mobile/Documents）
+        NSString *outDir = nil;
+        for (NSString *d in @[@"/var/mobile/Documents",
+                              @"/var/mobile/Library/CryptoHook",
+                              NSTemporaryDirectory()]) {
+            if (!d) continue;
+            [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+            if ([fm isWritableFileAtPath:d]) { outDir = d; break; }
+        }
+        if (!outDir) { [self toast:@"没有可写目录"]; return; }
+
+        NSString *dst = [outDir stringByAppendingPathComponent:@"CryptoHook.dylib"];
+        [fm removeItemAtPath:dst error:nil];
+        NSError *err = nil;
+        if (![fm copyItemAtPath:src toPath:dst error:&err]) {
+            [self toast:[NSString stringWithFormat:@"复制失败: %@", err.localizedDescription]];
+            return;
+        }
+        // 顺手把当前配置也导出（导出后默认值跟着走）
+        NSString *cfgDst = [outDir stringByAppendingPathComponent:@"CryptoHook-config.plist"];
+        [self.cfg writeToFile:cfgDst atomically:YES];
+
+        [self toast:[NSString stringWithFormat:@"已导出到\n%@", dst]];
+
+        UIActivityViewController *av = [[UIActivityViewController alloc]
+            initWithActivityItems:@[[NSURL fileURLWithPath:dst]] applicationActivities:nil];
+        av.popoverPresentationController.sourceView = self.view;
+        av.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
+                                                                 self.view.bounds.size.height/2, 1, 1);
+        [self presentViewController:av animated:YES completion:nil];
+    } @catch (NSException *e) {
+        [self toast:[NSString stringWithFormat:@"异常: %@", e.reason]];
+    }
+}
+
+- (void)toast:(NSString *)msg {
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"导出"
+        message:msg preferredStyle:UIAlertControllerStyleAlert];
+    [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:al animated:YES completion:nil];
 }
 
