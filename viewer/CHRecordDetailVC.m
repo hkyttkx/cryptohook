@@ -198,6 +198,8 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     // ── ① 基础 ──
     addRaw(makeSectionHeader(@"基础", col));
     addField(@"类型", [NSString stringWithFormat:@"%@ · %@", self.record.layer, self.record.type], YES);
+    NSString *op = [self.record opTag];
+    if (op.length) addField(@"操作", op, YES);
     NSString *algo = [self.record algoTag];
     if (algo.length) addField(@"算法", algo, YES);
     // 长度关系判型
@@ -222,37 +224,39 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         addRaw(makeSectionHeader(@"密钥材料", CH_ACCENT));
         addField(@"KEY", r[@"key"], YES);
         addField(@"IV",  r[@"iv"],  YES);
-        addField(@"HMAC KEY", r[@"key"] && r[@"mac"] ? r[@"key"] : nil, YES);
     }
 
-    // ── ③ 数据 ──
-    BOOL hasData = (r[@"text"] || r[@"inText"] || r[@"in"] || r[@"out"] || r[@"outText"]);
-    if (hasData) {
-        addRaw(makeSectionHeader(@"数据", CH_BLUE));
-        // 明文优先
+    // ── ③ 原始数据（输入）──
+    BOOL hasIn = (r[@"text"] || r[@"inText"] || r[@"in"] || r[@"reqText"] || r[@"req"] ||
+                  r[@"data"] || r[@"hash"]);
+    if (hasIn) {
+        addRaw(makeSectionHeader(@"原始数据（输入 in）", CH_BLUE));
         NSString *plain = r[@"text"] ?: r[@"inText"];
         if (plain) addField(@"明文", plain, NO);
-        if (r[@"outText"]) addField(@"解密结果", r[@"outText"], NO);
-        // hex 数据（带 ASCII 双显）
-        addData(@"密文 in",  r[@"in"]);
-        addData(@"输出 out", r[@"out"]);
-        addData(@"HMAC / MAC", r[@"mac"]);
-        addData(@"哈希", r[@"hash"]);
+        addData(@"原始", r[@"in"]);
+        addData(@"请求体", r[@"reqText"] ? nil : r[@"req"]);
         addData(@"数据", r[@"data"]);
-        if (r[@"inLen"])  addField(@"输入长度", [NSString stringWithFormat:@"%@ 字节", r[@"inLen"]], NO);
+        if (r[@"inLen"]) addField(@"输入长度", [NSString stringWithFormat:@"%@ 字节", r[@"inLen"]], NO);
+    }
+
+    // ── ④ 结果数据（输出）──
+    NSString *outPlain = r[@"outText"] ?: r[@"respText"];
+    BOOL hasOut = (outPlain || r[@"out"] || r[@"mac"] || r[@"resp"]);
+    if (hasOut) {
+        addRaw(makeSectionHeader(@"结果数据（输出 out）", CH_ACCENT));
+        if (outPlain) addField(@"明文", outPlain, NO);
+        addData(@"结果", r[@"out"]);
+        addData(@"HMAC / MAC", r[@"mac"]);
+        addData(@"响应体", r[@"respText"] ? nil : r[@"resp"]);
         if (r[@"outLen"]) addField(@"输出长度", [NSString stringWithFormat:@"%@ 字节", r[@"outLen"]], NO);
     }
 
-    // ── ④ 网络 ──
-    if (r[@"url"] || r[@"method"] || r[@"status"] || r[@"reqText"] || r[@"respText"]) {
+    // ── ⑤ 网络 ──
+    if (r[@"url"] || r[@"method"] || r[@"status"] || r[@"error"]) {
         addRaw(makeSectionHeader(@"网络", CH_ORANGE));
         addField(@"URL", r[@"url"], NO);
         addField(@"方法", r[@"method"], NO);
         if (r[@"status"]) addField(@"状态码", [NSString stringWithFormat:@"%@", r[@"status"]], NO);
-        if (r[@"reqText"]) addField(@"请求体", r[@"reqText"], NO);
-        else addData(@"请求体", r[@"req"]);
-        if (r[@"respText"]) addField(@"响应体", r[@"respText"], NO);
-        else addData(@"响应体", r[@"resp"]);
         if (r[@"error"]) addField(@"错误", r[@"error"], NO);
     }
 
