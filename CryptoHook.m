@@ -785,6 +785,30 @@ static void doScanKey(NSDictionary *req) {
     NSData *ctFull = hexToDataLocal(ctHex);
     if (!ctFull.length) return;
 
+    // ★ 若原数据是 base64 文本（QBL 的响应），先解 base64
+    if ([req[@"maybeBase64"] boolValue]) {
+        NSString *txt = [[NSString alloc] initWithData:ctFull encoding:NSUTF8StringEncoding];
+        if (txt.length) {
+            // 去掉引号和空白
+            NSMutableString *clean = [NSMutableString string];
+            for (NSUInteger i = 0; i < txt.length; i++) {
+                unichar c = [txt characterAtIndex:i];
+                if ((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='+'||c=='/'||c=='=') {
+                    if (c == '=') break;      // base64 结束
+                    [clean appendFormat:@"%C", c];
+                }
+            }
+            // 补 padding
+            while (clean.length % 4) [clean appendString:@"="];
+            NSData *dec = [[NSData alloc] initWithBase64EncodedString:clean options:0];
+            if (dec.length >= 16) {
+                NSLog(@"[CryptoHook] base64 解码 %lu -> %lu 字节",
+                      (unsigned long)ctFull.length, (unsigned long)dec.length);
+                ctFull = dec;
+            }
+        }
+    }
+
     // 密文可能是 IV(16)+CT 或纯 CT —— 两种都试
     NSMutableArray *ctCands = [NSMutableArray array];
     [ctCands addObject:ctFull];
