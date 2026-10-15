@@ -149,34 +149,56 @@ static NSString *tryUTF8(const void *p, size_t n) {
     return s;
 }
 static NSDictionary *base(NSString *layer, NSString *type) {
-    return [@{
+    NSMutableDictionary *d = [@{
         @"t":  @([NSDate date].timeIntervalSince1970),
         @"pid":@(getpid()),
         @"app":gAppId ?: @"?",
         @"layer":layer,
         @"type":type
     } mutableCopy];
+    // ★ 完整调用栈（过滤系统噪音，最多 12 帧）
+    NSArray *bt = fullBacktrace(3);
+    if (bt.count) {
+        d[@"bt"] = bt;
+        d[@"caller"] = bt.firstObject;   // 兼容旧字段
+    }
+    return d;
 }
 static void emit(NSMutableDictionary *rec) {
     logJSON(rec);
     NSLog(@"[CryptoHook] %@", rec);
 }
 
-// 调用栈：找第一个"非系统库"的帧（自研函数候选）
-static NSString *callerOutsideSystem(int skip) {
-    void *bt[48];
-    int n = backtrace(bt, 48);
-    for (int i = skip; i < n; i++) {
+// 调用栈：完整帧列表（过滤系统库噪音），返回字符串数组
+static NSArray<NSString *> *fullBacktrace(int skip) {
+    void *bt[64];
+    int n = backtrace(bt, 64);
+    if (n <= 0) return nil;
+    NSMutableArray *out = [NSMutableArray array];
+    for (int i = skip; i < n && out.count < 12; i++) {
         Dl_info info;
-        if (dladdr(bt[i], &info) && info.dli_fname) {
-            NSString *f = @(info.dli_fname);
-            if ([f containsString:@"/System/"] || [f containsString:@"/usr/lib/"]) continue;
-            return [NSString stringWithFormat:@"%s+%ld @%p (in %@)",
-                    info.dli_sname ?: "?", (long)0, bt[i],
-                    [f lastPathComponent]];
-        }
+        if (!dladdr(bt[i], &info) || !info.dli_fname) continue;
+        NSString *f = @(info.dli_fname);
+        // 系统库只保留前 2 帧作为上下文，其余跳过
+        BOOL sys = [f containsString:@"/System/"] || [f containsString:@"/usr/lib/"];
+        if (sys && out.count > 2) continue;
+        NSString *sym = info.dli_sname ? @(info.dli_sname) : @"?";
+        // 计算文件内偏移（便于 IDA 定位）
+        unsigned long off = (unsigned long)((uintptr_t)bt[i] - (uintptr_t)info.dli_fbase);
+        [out addObject:[NSString stringWithFormat:@"%@ +0x%lx @%p %@",
+                        sym, off, bt[i], [f lastPathComponent]]];
     }
-    return nil;
+    return out.count ? out : nil;
+}
+
+// 摘要：第一个非系统帧（兼容旧的 caller 字段）
+static NSString *callerOutsideSystem(int skip) {
+    NSArray *frames = fullBacktrace(skip);
+    for (NSString *f in frames) {
+        if (![f containsString:@"/System/"] && ![f containsString:@"/usr/lib/"])
+            return f;
+    }
+    return frames.firstObject;
 }
 
 // ============================================================
