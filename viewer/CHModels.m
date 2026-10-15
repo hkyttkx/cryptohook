@@ -66,6 +66,31 @@
     return [parts componentsJoinedByString:@" · "];
 }
 
+- (NSString *)algoTag {
+    NSNumber *a = self.raw[@"alg"];
+    NSInteger i = a ? a.integerValue : -1;
+
+    if ([self.type isEqualToString:@"CCCrypt"] || [self.type isEqualToString:@"CCCryptorCreate"]) {
+        NSArray *n = @[@"AES", @"DES", @"3DES", @"CAST", @"RC4", @"RC2", @"Blowfish"];
+        return (i >= 0 && i < (NSInteger)n.count) ? n[i] : nil;
+    }
+    if ([self.type isEqualToString:@"CCHmac"]) {
+        NSArray *n = @[@"HMAC-SHA1", @"HMAC-MD5", @"HMAC-SHA256",
+                       @"HMAC-SHA384", @"HMAC-SHA512", @"HMAC-SHA224"];
+        return (i >= 0 && i < (NSInteger)n.count) ? n[i] : @"HMAC";
+    }
+    if ([self.type isEqualToString:@"CC_SHA256"]) return @"SHA256";
+    if ([self.type rangeOfString:@"SecKey"].location != NSNotFound) {
+        NSString *alg = self.raw[@"alg"];
+        if ([alg containsString:@"RSA"])  return @"RSA";
+        if ([alg containsString:@"EC"])   return @"ECDSA";
+        if ([alg containsString:@"AES"])  return @"AES-GCM";
+        return @"ASYM";
+    }
+    if ([self.type isEqualToString:@"PBKDF2"]) return @"PBKDF2";
+    return nil;
+}
+
 - (NSString *)detail {
     NSMutableArray *lines = [NSMutableArray array];
     NSString *text = self.raw[@"inText"] ?: self.raw[@"outText"] ?: self.raw[@"text"] ?: self.raw[@"respText"] ?: self.raw[@"reqText"];
