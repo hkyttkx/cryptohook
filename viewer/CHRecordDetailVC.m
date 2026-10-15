@@ -52,13 +52,14 @@ static NSString *textToHex(NSString *s) {
 @property (nonatomic, strong) UILabel *nameL;
 @property (nonatomic, strong) UILabel *valueL;
 @property (nonatomic, strong) UIButton *dupBtn;
-- (instancetype)initWithName:(NSString *)n value:(NSString *)v accent:(BOOL)accent;
+- (instancetype)initWithName:(NSString *)n value:(NSString *)v color:(UIColor *)color;
 @end
 
 @implementation CHFieldView
-- (instancetype)initWithName:(NSString *)n value:(NSString *)v accent:(BOOL)accent {
+- (instancetype)initWithName:(NSString *)n value:(NSString *)v color:(UIColor *)color {
     self = [super init];
     if (self) {
+        if (!color) color = CH_TEXT2;
         _fieldName = [n copy];
         _fieldValue = [v copy];
         self.backgroundColor = CH_CARD;
@@ -71,7 +72,7 @@ static NSString *textToHex(NSString *s) {
         _nameL.numberOfLines = 1;
         _nameL.attributedText = [CHTheme tracked:n
             font:[CHTheme mono:10 weight:UIFontWeightBold]
-            color:(accent ? CH_ACCENT : CH_BLUE) spacing:1.2];
+            color:color spacing:1.2];
         _nameL.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_nameL];
 
@@ -197,47 +198,47 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     NSMutableArray *stack = [NSMutableArray array];   // 按顺序堆叠的视图
 
     void (^addRaw)(UIView *) = ^(UIView *v) { if (v) [stack addObject:v]; };
-    void (^addField)(NSString *, id, BOOL) = ^(NSString *n, id val, BOOL accent) {
+    void (^addField)(NSString *, id, UIColor *) = ^(NSString *n, id val, UIColor *color) {
         NSString *s = nil;
         if ([val isKindOfClass:[NSString class]]) s = val;
         else if (val) s = [val description];
         if (s.length == 0) return;
-        [stack addObject:[[CHFieldView alloc] initWithName:n value:s accent:accent]];
+        [stack addObject:[[CHFieldView alloc] initWithName:n value:s color:color]];
     };
     // ★ 数据三编码：HEX / Base64 / 文本
-    void (^addData)(NSString *, NSString *, BOOL) = ^(NSString *n, NSString *hex, BOOL accent) {
+    void (^addData)(NSString *, NSString *, UIColor *) = ^(NSString *n, NSString *hex, UIColor *color) {
         if (![hex isKindOfClass:[NSString class]] || hex.length < 2) return;
         [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · HEX"]
-                                value:hex accent:accent]];
+                                value:hex color:color]];
         NSString *b64 = hexToBase64(hex);
         if (b64.length) [stack addObject:[[CHFieldView alloc]
                                 initWithName:[n stringByAppendingString:@" · Base64"]
-                                value:b64 accent:accent]];
+                                value:b64 color:color]];
         NSString *asc = hexToASCII(hex);
         if (asc.length) [stack addObject:[[CHFieldView alloc]
                                 initWithName:[n stringByAppendingString:@" · 文本"]
-                                value:asc accent:accent]];
+                                value:asc color:color]];
     };
     // 文本类字段：文本 / HEX / Base64
-    void (^addText)(NSString *, NSString *, BOOL) = ^(NSString *n, NSString *v, BOOL accent) {
+    void (^addText)(NSString *, NSString *, UIColor *) = ^(NSString *n, NSString *v, UIColor *color) {
         if (![v isKindOfClass:[NSString class]] || v.length == 0) return;
         [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · 文本"]
-                                value:v accent:accent]];
+                                value:v color:color]];
         NSString *h = textToHex(v);
         if (h.length) [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · HEX"]
-                                value:h accent:accent]];
+                                value:h color:color]];
         NSData *d = [v dataUsingEncoding:NSUTF8StringEncoding];
         if (d.length) [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · Base64"]
-                                value:[d base64EncodedStringWithOptions:0] accent:accent]];
+                                value:[d base64EncodedStringWithOptions:0] color:color]];
     };
 
     // ── ① 基础 ──
     addRaw(makeSectionHeader(@"基础", col));
-    addField(@"类型", [NSString stringWithFormat:@"%@ · %@", self.record.layer, self.record.type], YES);
+    addField(@"类型", [NSString stringWithFormat:@"%@ · %@", self.record.layer, self.record.type], CH_TEXT2);
     NSString *op = [self.record opTag];
-    if (op.length) addField(@"操作", op, YES);
+    if (op.length) addField(@"操作", op, CH_ORANGE);
     NSString *algo = [self.record algoTag];
-    if (algo.length) addField(@"算法", algo, YES);
+    if (algo.length) addField(@"算法", algo, CH_ACCENT);
     // 长度关系判型
     NSNumber *inL = r[@"inLen"], *outL = r[@"outLen"];
     if (inL && outL) {
@@ -248,18 +249,18 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
                                         shape = @"out = 16 对齐 → 疑似分组密码 + PKCS7 (AES-CBC)";
         else if (b == 16 || b == 20 || b == 32 || b == 64)
                                         shape = @"out 固定长度 → 疑似摘要 / HMAC";
-        if (shape) addField(@"判型", shape, NO);
+        if (shape) addField(@"判断结果", shape, CH_PURPLE);
     }
     NSDateFormatter *df = [NSDateFormatter new];
     df.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
-    addField(@"时间", [df stringFromDate:self.record.date], NO);
+    addField(@"时间", [df stringFromDate:self.record.date], CH_SUB);
 
     // ── ② 密钥材料 ──
     BOOL hasKeyMat = (r[@"key"] || r[@"iv"]);
     if (hasKeyMat) {
         addRaw(makeSectionHeader(@"密钥材料", CH_ACCENT));
-        addData(@"KEY", r[@"key"], YES);
-        addData(@"IV",  r[@"iv"],  YES);
+        addData(@"KEY", r[@"key"], CH_ACCENT);
+        addData(@"IV",  r[@"iv"],  CH_BLUE);
     }
 
     // ── ③ 原始数据（输入）──
@@ -268,11 +269,11 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     if (hasIn) {
         addRaw(makeSectionHeader(@"原始数据（输入 in）", CH_BLUE));
         NSString *plain = r[@"text"] ?: r[@"inText"];
-        if (plain) addText(@"明文", plain, NO);
-        addData(@"密文", r[@"in"], NO);
-        addData(@"请求体", r[@"reqText"] ? nil : r[@"req"], NO);
-        addData(@"数据", r[@"data"], NO);
-        if (r[@"inLen"]) addField(@"输入长度", [NSString stringWithFormat:@"%@ 字节", r[@"inLen"]], NO);
+        if (plain) addText(@"明文", plain, CH_ACCENT);
+        addData(@"密文", r[@"in"], CH_ORANGE);
+        addData(@"请求体", r[@"reqText"] ? nil : r[@"req"], CH_ORANGE);
+        addData(@"数据", r[@"data"], CH_TEXT2);
+        if (r[@"inLen"]) addField(@"输入长度", [NSString stringWithFormat:@"%@ 字节", r[@"inLen"]], CH_SUB);
     }
 
     // ── ④ 结果数据（输出）──
@@ -280,20 +281,20 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     BOOL hasOut = (outPlain || r[@"out"] || r[@"mac"] || r[@"resp"]);
     if (hasOut) {
         addRaw(makeSectionHeader(@"结果数据（输出 out）", CH_ACCENT));
-        if (outPlain) addText(@"明文", outPlain, NO);
-        addData(@"明文/结果", r[@"out"], NO);
-        addData(@"HMAC", r[@"mac"], NO);
-        addData(@"响应体", r[@"respText"] ? nil : r[@"resp"], NO);
-        if (r[@"outLen"]) addField(@"输出长度", [NSString stringWithFormat:@"%@ 字节", r[@"outLen"]], NO);
+        if (outPlain) addText(@"明文", outPlain, CH_ACCENT);
+        addData(@"解密结果", r[@"out"], CH_ACCENT);
+        addData(@"HMAC", r[@"mac"], CH_PURPLE);
+        addData(@"响应体", r[@"respText"] ? nil : r[@"resp"], CH_ORANGE);
+        if (r[@"outLen"]) addField(@"输出长度", [NSString stringWithFormat:@"%@ 字节", r[@"outLen"]], CH_SUB);
     }
 
     // ── ⑤ 网络 ──
     if (r[@"url"] || r[@"method"] || r[@"status"] || r[@"error"]) {
         addRaw(makeSectionHeader(@"网络", CH_ORANGE));
-        addField(@"URL", r[@"url"], NO);
-        addField(@"方法", r[@"method"], NO);
-        if (r[@"status"]) addField(@"状态码", [NSString stringWithFormat:@"%@", r[@"status"]], NO);
-        if (r[@"error"]) addField(@"错误", r[@"error"], NO);
+        addField(@"URL", r[@"url"], CH_ORANGE);
+        addField(@"方法", r[@"method"], CH_ORANGE);
+        if (r[@"status"]) addField(@"状态码", [NSString stringWithFormat:@"%@", r[@"status"]], CH_ORANGE);
+        if (r[@"error"]) addField(@"错误", r[@"error"], CH_RED);
     }
 
     // ── ⑤ 调用栈 ──
@@ -304,10 +305,10 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         for (NSInteger i = 0; i < (NSInteger)bt.count; i++)
             [s appendFormat:@"%2ld  %@\n", (long)i, bt[i]];
         [stack addObject:[[CHFieldView alloc] initWithName:@"backtrace"
-                                value:s accent:NO]];
+                                value:s color:CH_PURPLE]];
     } else if (r[@"caller"]) {
         addRaw(makeSectionHeader(@"调用栈", CH_PURPLE));
-        addField(@"调用者", r[@"caller"], NO);
+        addField(@"调用者", r[@"caller"], CH_PURPLE);
     }
 
     // ── ⑥ 聚合历史 ──
@@ -318,7 +319,7 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         tf.dateFormat = @"HH:mm:ss.SSS";
         [s appendFormat:@"共出现 %ld 次\n\n", (long)self.record.count];
         for (CHRecord *d in self.record.dups) [s appendFormat:@"%@\n", [tf stringFromDate:d.date]];
-        [stack addObject:[[CHFieldView alloc] initWithName:@"时间列表" value:s accent:NO]];
+        [stack addObject:[[CHFieldView alloc] initWithName:@"时间列表" value:s color:CH_PURPLE]];
     }
 
     // ── ⑦ 原始记录 ──
@@ -326,7 +327,7 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     NSData *jd = [NSJSONSerialization dataWithJSONObject:r
                     options:NSJSONWritingPrettyPrinted error:nil];
     NSString *json = [[NSString alloc] initWithData:jd encoding:NSUTF8StringEncoding];
-    if (json) [stack addObject:[[CHFieldView alloc] initWithName:@"RAW JSON" value:json accent:NO]];
+    if (json) [stack addObject:[[CHFieldView alloc] initWithName:@"RAW JSON" value:json color:CH_TEXT2]];
 
     // ── 布局 ──
     for (UIView *v in stack) {
