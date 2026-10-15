@@ -161,7 +161,7 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
             c.detailTextLabel.text = CFG_PATH;
         }
     } else {
-        c.textLabel.text = @"CryptoHook";
+        c.textLabel.text = @"AzbcpxTuT";
         c.detailTextLabel.text = @"v1.0 · dyld interpose + ObjC hook";
         c.selectionStyle = UITableViewCellSelectionStyleNone;
     }
