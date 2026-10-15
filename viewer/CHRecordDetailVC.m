@@ -483,9 +483,10 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         }
     }
 
-    // 有密文才能扫
-    NSString *cipher = r[@"in"] ?: r[@"out"];
-    if ([cipher isKindOfClass:[NSString class]] && cipher.length >= 64) {
+    // 有密文才能扫（认所有可能字段）
+    NSString *cipher = r[@"in"] ?: r[@"out"] ?: r[@"resp"] ?: r[@"req"]
+                     ?: r[@"data"] ?: r[@"mac"] ?: r[@"hash"];
+    if ([cipher isKindOfClass:[NSString class]] && cipher.length >= 32) {
         [al addAction:[UIAlertAction actionWithTitle:@"扫描 AES Key（L4）"
                               style:UIAlertActionStyleDefault
                             handler:^(UIAlertAction *a){ [self startKeyScan]; }]];
@@ -499,8 +500,31 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
 #pragma mark - L4：密钥扫描
 - (void)startKeyScan {
     NSDictionary *r = self.record.raw;
-    NSString *cipher = r[@"in"] ?: r[@"out"];
-    if (cipher.length < 64) return;
+    NSString *cipher = r[@"in"] ?: r[@"out"] ?: r[@"resp"] ?: r[@"req"]
+                     ?: r[@"data"] ?: r[@"mac"] ?: r[@"hash"];
+    if (cipher.length < 32) return;
+
+    // ★ 判断这段数据本身是不是 base64 文本（QBL 的响应就是）
+    //   六进制 -> bytes -> 看是否像 base64 字符串
+    BOOL maybeB64 = NO;
+    {
+        NSMutableData *bd = [NSMutableData data];
+        for (NSUInteger i = 0; i + 1 < cipher.length; i += 2) {
+            unsigned int v = 0;
+            if (![[NSScanner scannerWithString:[cipher substringWithRange:NSMakeRange(i, 2)]] scanHexInt:&v]) break;
+            uint8_t b = (uint8_t)v;
+            [bd appendBytes:&b length:1];
+        }
+        if (bd.length >= 16) {
+            const uint8_t *b = bd.bytes;
+            NSUInteger pr = 0, lim = MIN(bd.length, 64);
+            for (NSUInteger i = 0; i < lim; i++) {
+                uint8_t c = b[i];
+                if ((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='+'||c=='/'||c=='='||c=='"') pr++;
+            }
+            if (pr * 100 / lim >= 90) maybeB64 = YES;
+        }
+    }
 
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *dir = @"/var/mobile/Library/CryptoHook";
@@ -509,9 +533,10 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     NSString *nonce = [NSString stringWithFormat:@"%.0f", [NSDate date].timeIntervalSince1970 * 1000];
     NSDictionary *req = @{
         @"cipherHex": cipher,
+        @"maybeBase64": @(maybeB64),      // ★ 让 dylib 先 base64 解码再扫
         @"nonce": nonce,
         @"t": @([NSDate date].timeIntervalSince1970),
-        @"algs": @[@(0), @(5)]     // 0=AES, 5=RC4 都试
+        @"algs": @[@(0), @(5)]            // 0=AES, 5=RC4 都试
     };
     NSString *reqPath = [dir stringByAppendingPathComponent:@"scan_request.plist"];
     NSString *resPath = [dir stringByAppendingPathComponent:@"scan_result.plist"];
