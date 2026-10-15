@@ -25,6 +25,19 @@
 #include <mach/mach.h>
 #include <mach/vm_region.h>
 
+// ── 开源 hook 引擎 ──
+#include "third_party/fishhook.h"          // facebook/fishhook：重绑定 __la_symbol_ptr
+
+// ElleKit / CydiaSubstrate 提供的 inline hook（能打无符号的自研函数）
+typedef void *(*MSHookFunction_t)(void *symbol, void *replace, void **result);
+static MSHookFunction_t gMSHookFunction = NULL;
+
+// 自检标志（自检期间产生的记录会标记出来）
+static volatile int gSelfTest = 0;
+static volatile int gInterposeHits = 0;   // interpose 被触发次数
+static volatile int gFishhookHits  = 0;   // fishhook 被触发次数
+
+
 // ============================================================
 // 配置（由 CryptoViewer 写入；dylib 优先读【自己沙盒】，其次共享目录）
 // ============================================================
@@ -281,6 +294,7 @@ static BOOL cfgExcluded(NSDictionary *rec) {
 
 static void emit(NSMutableDictionary *rec) {
     @try {
+        if (gSelfTest) rec[@"selftest"] = @YES;
         if (cfgExcluded(rec)) return;   // ★ 命中过滤规则，直接丢
         logJSON(rec);
         // ★ 不再 NSLog（写系统日志很慢，改成配置开关）
@@ -361,6 +375,7 @@ static void refDrop(void *ref) {
 static CCCryptorStatus my_CCCrypt(CCOperation op, CCAlgorithm alg, CCOptions opt,
     const void *key, size_t keyLen, const void *iv,
     const void *in, size_t inLen, void *out, size_t outAvail, size_t *moved) {
+    __sync_fetch_and_add(&gInterposeHits, 1);        // ★ 计数（证明确实被调到）
     CCCryptorStatus r = CCCrypt(op,alg,opt,key,keyLen,iv,in,inLen,out,outAvail,moved);
     if (!cfgOn(@"L1")) return r;                       // ★ 开关
     if (rateGate("CCCrypt", cfgRate())) {
@@ -901,6 +916,86 @@ static void checkScanRequest(void) {
 // ============================================================
 // 初始化
 // ============================================================
+// ============================================================
+// Hook 引擎安装 + 自检
+// ============================================================
+static void installMSHook(void) {
+    // 从已加载的插件里找 MSHookFunction（ElleKit 提供）
+    gMSHookFunction = (MSHookFunction_t)dlsym(RTLD_DEFAULT, "MSHookFunction");
+    if (!gMSHookFunction) {
+        void *h = dlopen("/usr/lib/libsubstrate.dylib", RTLD_NOW);
+        if (h) gMSHookFunction = (MSHookFunction_t)dlsym(h, "MSHookFunction");
+    }
+    if (!gMSHookFunction) {
+        void *h = dlopen("/var/jb/usr/lib/libellekit.dylib", RTLD_NOW);
+        if (h) gMSHookFunction = (MSHookFunction_t)dlsym(h, "MSHookFunction");
+    }
+    NSLog(@"[CryptoHook] MSHookFunction = %s", gMSHookFunction ? "可用" : "未找到");
+}
+
+/// 用 fishhook 再绑一次（补 interpose 在 dlsym 缓存场景的失效）
+static CCCryptorStatus (*fh_CCCrypt)(CCOperation, CCAlgorithm, CCOptions,
+    const void*, size_t, const void*, const void*, size_t, void*, size_t, size_t*);
+static CCCryptorStatus my_CCCrypt_fh(CCOperation op, CCAlgorithm alg, CCOptions opt,
+    const void *key, size_t keyLen, const void *iv,
+    const void *in, size_t inLen, void *out, size_t outAvail, size_t *moved) {
+    __sync_fetch_and_add(&gFishhookHits, 1);         // ★ 计数
+    CCCryptorStatus r = fh_CCCrypt(op,alg,opt,key,keyLen,iv,in,inLen,out,outAvail,moved);
+    if (cfgOn(@"L1") && !gSelfTest && rateGate("fhCCCrypt", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCCrypt");
+        d[@"src"] = @"fishhook";
+        d[@"op"]  = (op == kCCEncrypt) ? @"ENC" : @"DEC";
+        d[@"alg"] = @(alg);
+        d[@"key"] = hexStr(key, keyLen, 128);
+        if (iv) d[@"iv"] = hexStr(iv, 16, 32);
+        d[@"inLen"] = @(inLen);
+        d[@"in"] = hexStr(in, inLen, 4096);
+        if (out && moved && *moved) {
+            d[@"outLen"] = @(*moved);
+            d[@"out"] = hexStr(out, *moved, 4096);
+        }
+        emit(d);
+    }
+    return r;
+}
+
+static void installFishhook(void) {
+    struct rebinding rb[] = {
+        {"CCCrypt", (void *)my_CCCrypt_fh, (void **)&fh_CCCrypt},
+    };
+    int rc = rebind_symbols(rb, 1);
+    NSLog(@"[CryptoHook] fishhook rebind CCCrypt rc=%d (0=成功)", rc);
+}
+
+/// 自检：自己调一次 CCCrypt，看链路是否通
+static void selfTestHooks(void) {
+    gSelfTest = 1;
+    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t iv[16]  = {0};
+    const char *pt = "CRYPTOHOOK-SELFTEST";
+    uint8_t out[64]; size_t moved = 0;
+    CCCrypt(kCCEncrypt, kCCAlgorithmAES, kCCOptionPKCS7Padding,
+            key, 16, iv, pt, strlen(pt), out, sizeof(out), &moved);
+    gSelfTest = 0;
+
+    // 写一份诊断结果
+    NSMutableDictionary *d = base(@"SYS", @"selftest");
+    d[@"interpose"] = @(gInterposeHits);
+    d[@"fishhook"]  = @(gFishhookHits);
+    d[@"mshook"]    = gMSHookFunction ? @"ok" : @"none";
+    d[@"pid"]       = @(getpid());
+    d[@"bundle"]    = [[NSBundle mainBundle] bundleIdentifier] ?: @"?";
+    NSString *verdict;
+    if (gInterposeHits > 0 || gFishhookHits > 0)
+        verdict = @"hook 链路正常";
+    else
+        verdict = @"⚠️ interpose 未生效（可能需要 inline hook 或换注入目标）";
+    d[@"verdict"] = verdict;
+    emit(d);
+    NSLog(@"[CryptoHook] 自检: interpose=%d fishhook=%d mshook=%s -> %@",
+          gInterposeHits, gFishhookHits, gMSHookFunction ? "yes" : "no", verdict);
+}
+
 __attribute__((constructor))
 static void ch_init(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0*NSEC_PER_SEC)),
@@ -910,8 +1005,13 @@ static void ch_init(void) {
         d[@"bundle"] = [[NSBundle mainBundle] bundleIdentifier] ?: @"?";
         d[@"version"] = @"MVP2";
         emit(d);
+        installMSHook();      // 探查 inline hook 可用性
+        installFishhook();    // 补 dyp 缓存场景
         installL2();
         installL3();
+        // 延迟再自检（等所有 constructor 跑完）
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5*NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ selfTestHooks(); });
         // ★ 每 2 秒检查一次扫描请求
         dispatch_source_t st = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                      dispatch_get_global_queue(0, 0));
