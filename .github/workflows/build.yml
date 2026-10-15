@@ -29,6 +29,7 @@ jobs:
             -isysroot "$SDK" -miphoneos-version-min=14.0 \
             -dynamiclib -fobjc-arc -O2 \
             -o dist/CryptoHook.dylib CryptoHook.m \
+            third_party/fishhook.c \
             -framework Foundation -framework UIKit -framework Security \
             -install_name @executable_path/Frameworks/CryptoHook.dylib > dylib.log 2>&1
           EXIT=$?
