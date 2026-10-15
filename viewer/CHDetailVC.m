@@ -394,11 +394,12 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     more.tintColor = CH_ACCENT;
     self.navigationItem.rightBarButtonItem = more;
 
-    // ★ 时间范围按钮
+    // ★ 时间范围按钮（放右侧，避免被返回按钮挤掉）
     self.timeBtn = [[UIBarButtonItem alloc] initWithTitle:@"全部"
         style:UIBarButtonItemStylePlain target:self action:@selector(pickTimeRange)];
     self.timeBtn.tintColor = CH_ACCENT;
-    self.navigationItem.leftBarButtonItem = self.timeBtn;
+    self.navigationItem.rightBarButtonItems = @[self.navigationItem.rightBarButtonItem ?: [[UIBarButtonItem alloc] init],
+                                                self.timeBtn];
 
     [self load];
     [self startTicker];
