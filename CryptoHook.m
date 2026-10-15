@@ -22,6 +22,32 @@
 #include <pthread.h>
 
 // ============================================================
+// 配置（由 CryptoViewer 写入，dylib 启动时读）
+// ============================================================
+static NSDictionary *gCfg = nil;
+static NSDate *gCfgTime = nil;
+
+#define CFG_PATH @"/var/mobile/Library/CryptoHook/config.plist"
+
+static void cfgRefresh(void) {
+    // 最多每 5 秒重读一次，允许 App 里改完立刻生效
+    if (gCfg && gCfgTime && -[gCfgTime timeIntervalSinceNow] < 5.0) return;
+    NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:CFG_PATH];
+    gCfg = d ?: @{};
+    gCfgTime = [NSDate date];
+}
+static BOOL cfgOn(NSString *key) {
+    cfgRefresh();
+    NSNumber *v = gCfg[key];
+    return v ? v.boolValue : YES;   // 默认全开
+}
+static int cfgRate(void) {
+    cfgRefresh();
+    NSNumber *v = gCfg[@"rate"];
+    return v ? v.intValue : 200;
+}
+
+// ============================================================
 // 日志层
 // ============================================================
 static FILE *gFp = NULL;
@@ -164,7 +190,8 @@ static CCCryptorStatus my_CCCrypt(CCOperation op, CCAlgorithm alg, CCOptions opt
     const void *key, size_t keyLen, const void *iv,
     const void *in, size_t inLen, void *out, size_t outAvail, size_t *moved) {
     CCCryptorStatus r = CCCrypt(op,alg,opt,key,keyLen,iv,in,inLen,out,outAvail,moved);
-    if (rateGate("CCCrypt", 200)) {
+    if (!cfgOn(@"L1")) return r;                       // ★ 开关
+    if (rateGate("CCCrypt", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CCCrypt");
         d[@"op"]  = (op == kCCEncrypt) ? @"ENC" : @"DEC";
         d[@"alg"] = @(alg);
@@ -188,7 +215,8 @@ DYLD_INTERPOSE(my_CCCrypt, CCCrypt)
 
 static CCCryptorStatus my_CCCryptorCreate(CCOperation op, CCAlgorithm alg, CCOptions opt,
     const void *key, size_t keyLen, const void *iv, CCCryptorRef *ref) {
-    if (rateGate("CCCreate", 100)) {
+    if (!cfgOn(@"L1")) return CCCryptorCreate(op,alg,opt,key,keyLen,iv,ref);
+    if (rateGate("CCCreate", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CCCryptorCreate");
         d[@"op"] = (op==kCCEncrypt)?@"ENC":@"DEC";
         d[@"alg"] = @(alg);
@@ -203,7 +231,8 @@ DYLD_INTERPOSE(my_CCCryptorCreate, CCCryptorCreate)
 static CCCryptorStatus my_CCCryptorUpdate(CCCryptorRef ref, const void *in, size_t inLen,
     void *out, size_t outAvail, size_t *moved) {
     CCCryptorStatus r = CCCryptorUpdate(ref,in,inLen,out,outAvail,moved);
-    if (rateGate("CCUpdate", 200)) {
+    if (!cfgOn(@"L1")) return r;
+    if (rateGate("CCUpdate", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CCCryptorUpdate");
         d[@"in"] = hexStr(in, inLen, 128);
         d[@"inLen"] = @(inLen);
@@ -216,7 +245,8 @@ DYLD_INTERPOSE(my_CCCryptorUpdate, CCCryptorUpdate)
 
 static void my_CCHmac(CCHmacAlgorithm alg, const void *key, size_t keyLen,
                       const void *data, size_t dataLen, void *out) {
-    if (rateGate("CCHmac", 200)) {
+    if (!cfgOn(@"L1")) { CCHmac(alg,key,keyLen,data,dataLen,out); return; }
+    if (rateGate("CCHmac", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CCHmac");
         d[@"alg"] = @(alg);
         d[@"key"] = hexStr(key, keyLen, 64);
@@ -231,7 +261,8 @@ static void my_CCHmac(CCHmacAlgorithm alg, const void *key, size_t keyLen,
 DYLD_INTERPOSE(my_CCHmac, CCHmac)
 
 static void my_CC_SHA256(const void *data, CC_LONG len, unsigned char *md) {
-    if (rateGate("SHA256", 100)) {
+    if (!cfgOn(@"L1")) { CC_SHA256(data,len,md); return; }
+    if (rateGate("SHA256", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CC_SHA256");
         d[@"in"] = hexStr(data, len, 96);
         d[@"inLen"] = @(len);
@@ -247,7 +278,8 @@ DYLD_INTERPOSE(my_CC_SHA256, CC_SHA256)
 
 static CFDataRef my_SecKeyCreateEncryptedData(SecKeyRef key, SecKeyAlgorithm alg,
                                               CFDataRef data, CFErrorRef *err) {
-    if (rateGate("SecEnc", 50)) {
+    if (!cfgOn(@"L1")) return SecKeyCreateEncryptedData(key,alg,data,err);
+    if (rateGate("SecEnc", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"SecKeyEncrypt");
         d[@"alg"] = (__bridge id)alg ?: @"?";
         d[@"in"] = hexStr(CFDataGetBytePtr(data), CFDataGetLength(data), 128);
@@ -261,7 +293,8 @@ DYLD_INTERPOSE(my_SecKeyCreateEncryptedData, SecKeyCreateEncryptedData)
 
 static CFDataRef my_SecKeyCreateDecryptedData(SecKeyRef key, SecKeyAlgorithm alg,
                                               CFDataRef data, CFErrorRef *err) {
-    if (rateGate("SecDec", 50)) {
+    if (!cfgOn(@"L1")) return SecKeyCreateDecryptedData(key,alg,data,err);
+    if (rateGate("SecDec", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"SecKeyDecrypt");
         d[@"alg"] = (__bridge id)alg ?: @"?";
         d[@"in"] = hexStr(CFDataGetBytePtr(data), CFDataGetLength(data), 128);
@@ -300,7 +333,8 @@ static BOOL looksInteresting(NSString *s) {
 
 static void recordString(const char *tag, NSString *s) {
     if (!s || !looksInteresting(s)) return;
-    if (!rateGate("str", 150)) return;
+    if (!cfgOn(@"L2")) return;
+    if (!rateGate("str", cfgRate())) return;
     NSMutableDictionary *d = base(@"L2", @"String");
     d[@"src"] = @(tag);
     d[@"text"] = s.length > 512 ? [s substringToIndex:512] : s;
@@ -340,7 +374,8 @@ static DataTaskIMP o_dataTask = NULL;
 
 static NSURLSessionDataTask *my_dataTask(id self, SEL _cmd, NSURLRequest *req,
                                          void (^completion)(NSData *, NSURLResponse *, NSError *)) {
-    if (rateGate("http", 60)) {
+    if (!cfgOn(@"L3")) return o_dataTask(self, _cmd, req, completion);
+    if (rateGate("http", cfgRate())) {
         NSMutableDictionary *d = base(@"L3", @"HTTP.request");
         d[@"url"] = req.URL.absoluteString ?: @"?";
         d[@"method"] = req.HTTPMethod ?: @"GET";
