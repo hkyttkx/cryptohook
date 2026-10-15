@@ -167,11 +167,16 @@
     self.tagL.attributedText = [CHTheme tracked:[CHTheme nameForLayer:r.layer]
         font:[CHTheme mono:9 weight:UIFontWeightBold] color:col spacing:1.0];
 
-    // 算法标签
+    // 算法标签（带操作方向：ENC·AES / DEC·AES / REQ / RESP）
     NSString *algo = [r algoTag];
-    if (algo.length) {
+    NSString *op   = [r opTag];
+    NSString *badge = nil;
+    if (op.length && algo.length)      badge = [NSString stringWithFormat:@"%@·%@", op, algo];
+    else if (op.length)                badge = op;
+    else if (algo.length)              badge = algo;
+    if (badge.length) {
         self.algoL.hidden = NO;
-        self.algoL.attributedText = [CHTheme tracked:algo
+        self.algoL.attributedText = [CHTheme tracked:badge
             font:[CHTheme mono:8.5 weight:UIFontWeightBold] color:col spacing:0.6];
         self.algoL.layer.borderColor = [col colorWithAlphaComponent:0.5].CGColor;
         self.algoL.backgroundColor = [col colorWithAlphaComponent:0.12];
