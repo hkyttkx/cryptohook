@@ -34,6 +34,28 @@
 
 @implementation CHRecord
 
+// ★ 去重键（方案 C：按 type + 关键字段）
+- (NSString *)dedupKey {
+    NSDictionary *r = self.raw;
+    NSString *t = self.type  ?: @"";
+    NSString *l = self.layer ?: @"";
+    if ([t isEqualToString:@"String"])
+        return [NSString stringWithFormat:@"%@|%@|%@", l, t, r[@"text"] ?: @""];
+    if ([t isEqualToString:@"CCCrypt"])
+        return [NSString stringWithFormat:@"%@|%@|%@|%@|%@", l, t,
+                r[@"op"], r[@"key"], r[@"inLen"]];
+    if ([t isEqualToString:@"CCHmac"])
+        return [NSString stringWithFormat:@"%@|%@|%@|%@", l, t, r[@"key"], r[@"dataLen"]];
+    if ([t isEqualToString:@"CC_SHA256"])
+        return [NSString stringWithFormat:@"%@|%@|%@", l, t, r[@"inLen"]];
+    if ([t hasPrefix:@"HTTP"])
+        return [NSString stringWithFormat:@"%@|%@|%@|%@", l, t,
+                r[@"url"] ?: @"", r[@"status"] ?: (r[@"method"] ?: @"")];
+    if ([t hasPrefix:@"SecKey"])
+        return [NSString stringWithFormat:@"%@|%@|%@|%@", l, t, r[@"alg"], r[@"inLen"]];
+    return [NSString stringWithFormat:@"%@|%@|%@", l, t, r.description];
+}
+
 - (NSString *)title {
     NSString *op = self.raw[@"op"];
     NSString *alg = nil;
