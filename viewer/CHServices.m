@@ -174,6 +174,7 @@
         if (!d) continue;
         const uint8_t *bytes = d.bytes;
         NSUInteger len = d.length, start = 0;
+        NSInteger lineNo = 0;
         for (NSUInteger i = 0; i <= len; i++) {
             if (i == len || bytes[i] == '\n') {
                 if (i > start) {
@@ -186,10 +187,13 @@
                         r.date = [NSDate dateWithTimeIntervalSince1970:r.t];
                         r.layer = obj[@"layer"] ?: @"?";
                         r.type  = obj[@"type"]  ?: @"?";
+                        r.srcFile = p;          // ★ 来源文件
+                        r.lineIdx = lineNo;     // ★ 行号
                         [out addObject:r];
                     }
                 }
                 start = i + 1;
+                lineNo++;
             }
         }
     }
@@ -201,4 +205,59 @@
     return out;
 }
 
+
+#pragma mark - 删除
++ (BOOL)removeLines:(NSIndexSet *)lines fromFile:(NSString *)path {
+    if (!path || !lines.count) return NO;
+    NSData *d = [NSData dataWithContentsOfFile:path];
+    if (!d) return NO;
+    NSMutableData *out = [NSMutableData dataWithCapacity:d.length];
+    const uint8_t *bytes = d.bytes;
+    NSUInteger len = d.length, start = 0;
+    NSInteger lineNo = 0;
+    static const uint8_t nl = '\n';
+    for (NSUInteger i = 0; i <= len; i++) {
+        if (i == len || bytes[i] == '\n') {
+            BOOL drop = [lines containsIndex:(NSUInteger)lineNo];
+            if (!drop && i > start) [out appendBytes:(bytes + start) length:(i - start)];
+            if (!drop && i > start) [out appendBytes:&nl length:1];
+            start = i + 1;
+            lineNo++;
+        }
+    }
+    return [out writeToFile:path atomically:YES];
+}
+
++ (BOOL)deleteRecord:(CHRecord *)rec {
+    if (!rec || rec.srcFile.length == 0 || rec.lineIdx < 0) return NO;
+    return [self removeLines:[NSIndexSet indexSetWithIndex:(NSUInteger)rec.lineIdx]
+                    fromFile:rec.srcFile];
+}
+
++ (NSInteger)deleteRecords:(NSArray<CHRecord *> *)recs {
+    NSMutableDictionary<NSString *, NSMutableIndexSet *> *map = [NSMutableDictionary dictionary];
+    void (^collect)(CHRecord *) = ^(CHRecord *r) {
+        if (!r || r.srcFile.length == 0 || r.lineIdx < 0) return;
+        NSMutableIndexSet *set = map[r.srcFile];
+        if (!set) { set = [NSMutableIndexSet indexSet]; map[r.srcFile] = set; }
+        [set addIndex:(NSUInteger)r.lineIdx];
+    };
+    NSInteger total = 0;
+    for (CHRecord *r in recs) {
+        collect(r);
+        for (CHRecord *d in r.dups) collect(d);
+        total++;
+    }
+    for (NSString *f in map) [self removeLines:map[f] fromFile:f];
+    return total;
+}
+
++ (NSInteger)clearApp:(CHApp *)app {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSInteger n = 0;
+    for (NSString *p in app.logFiles) {
+        if ([fm removeItemAtPath:p error:nil]) n++;
+    }
+    return n;
+}
 @end
