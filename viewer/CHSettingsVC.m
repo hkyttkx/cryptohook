@@ -292,21 +292,30 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
 - (void)clearAll {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSInteger n = 0;
+
+    // ① ★ 所有 App 的沙盒（记录实际写在这里）
+    for (CHApp *a in [CHScanner allApps]) {
+        if (a.recordCount == 0 && a.logFiles.count == 0) continue;
+        n += [CHScanner clearApp:a];
+    }
+
+    // ② 共享目录（若某 App 有权限写这里）
     for (NSString *d in @[@"/var/mobile/Library/CryptoHook", @"/tmp/CryptoHook"]) {
         NSDirectoryEnumerator *e = [fm enumeratorAtPath:d];
         for (NSString *f in e) {
             if ([f hasSuffix:@".log"]) {
-                [fm removeItemAtPath:[d stringByAppendingPathComponent:f] error:nil];
-                n++;
+                if ([fm removeItemAtPath:[d stringByAppendingPathComponent:f] error:nil]) n++;
             }
         }
     }
+
+    // ③ Viewer 自己的沙盒（一般没有，顺手）
     NSString *home = NSHomeDirectory();
     if (home) {
         NSString *d = [home stringByAppendingPathComponent:@"Documents/CryptoHook"];
         for (NSString *f in [fm contentsOfDirectoryAtPath:d error:nil])
             if ([f hasSuffix:@".log"]) {
-                [fm removeItemAtPath:[d stringByAppendingPathComponent:f] error:nil]; n++;
+                if ([fm removeItemAtPath:[d stringByAppendingPathComponent:f] error:nil]) n++;
             }
     }
     UIAlertController *al = [UIAlertController alertControllerWithTitle:@"已清空"
