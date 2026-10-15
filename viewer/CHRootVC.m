@@ -292,6 +292,32 @@
     [c configWith:[self appAt:ip]];
     return c;
 }
+#pragma mark - 左滑清空该 App 的记录
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)t
+    trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
+    CHApp *a = [self appAt:ip];
+    if (a.recordCount == 0) return nil;   // 没记录就不给删
+    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
+        title:@"清空" handler:^(UIContextualAction *action, UIView *v, void (^done)(BOOL)) {
+        UIAlertController *al = [UIAlertController alertControllerWithTitle:@"清空记录"
+            message:[NSString stringWithFormat:@"删除 %@ 的全部记录？不可恢复。", a.name ?: @"该 App"]
+            preferredStyle:UIAlertControllerStyleAlert];
+        [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel
+                        handler:^(UIAlertAction *x){ done(NO); }]];
+        [al addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
+                        handler:^(UIAlertAction *x){
+            NSInteger n = [CHScanner clearApp:a];
+            a.recordCount = 0;
+            NSLog(@"[CryptoViewer] 清空 %@ 的 %ld 个日志文件", a.bid, (long)n);
+            [self reload];
+            done(YES);
+        }]];
+        [self presentViewController:al animated:YES completion:nil];
+    }];
+    del.backgroundColor = CH_RED;
+    return [UISwipeActionsConfiguration configurationWithActions:@[del]];
+}
+
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     CHApp *a = [self appAt:ip];
     CHDetailVC *d = [CHDetailVC new];
