@@ -27,6 +27,10 @@
 @property (nonatomic, assign) NSTimeInterval lastT;  // 最近时间
 @property (nonatomic, strong) NSMutableArray<CHRecord *> *dups;  // 同内容的其它实例
 
+// ── 来源（用于删除回写文件）──
+@property (nonatomic, copy)   NSString *srcFile;     // 日志文件绝对路径
+@property (nonatomic, assign) NSInteger lineIdx;     // 在文件中的行号（0 基）
+
 /// 去重键（方案 C：按 type + 关键字段）
 @property (nonatomic, copy, readonly) NSString *dedupKey;
 
