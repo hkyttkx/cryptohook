@@ -11,6 +11,34 @@
 @implementation CHChip
 @end
 
+#pragma mark - 高亮工具
+/// 把 text 里所有 kw 命中处标成青绿 + 淡底
+static NSAttributedString *chHighlight(NSString *text, NSString *kw,
+                                       UIFont *font, UIColor *color, CGFloat spacing) {
+    NSMutableParagraphStyle *ps = [NSMutableParagraphStyle new];
+    ps.lineBreakMode = NSLineBreakByCharWrapping;
+    NSMutableAttributedString *as =
+        [[NSMutableAttributedString alloc] initWithString:(text ?: @"")
+            attributes:@{NSFontAttributeName: font,
+                         NSForegroundColorAttributeName: color,
+                         NSKernAttributeName: @(spacing),
+                         NSParagraphStyleAttributeName: ps}];
+    if (kw.length == 0 || text.length == 0) return as;
+    NSRange search = NSMakeRange(0, text.length);
+    NSInteger guard = 0;
+    while (search.length > 0 && guard++ < 200) {
+        NSRange hit = [text rangeOfString:kw options:NSCaseInsensitiveSearch range:search];
+        if (hit.location == NSNotFound) break;
+        [as addAttribute:NSForegroundColorAttributeName value:CH_ACCENT range:hit];
+        [as addAttribute:NSBackgroundColorAttributeName
+                   value:[CH_ACCENT colorWithAlphaComponent:0.22] range:hit];
+        NSUInteger next = hit.location + MAX(hit.length, 1);
+        if (next >= text.length) break;
+        search = NSMakeRange(next, text.length - next);
+    }
+    return as;
+}
+
 #pragma mark - Cell
 @interface CHRecCell : UITableViewCell
 @property (nonatomic, strong) UIView      *card;
@@ -24,7 +52,7 @@
 @property (nonatomic, strong) UILabel     *subL;
 @property (nonatomic, strong) UIView      *dataBox;
 @property (nonatomic, strong) UILabel     *dataL;
-- (void)configWith:(CHRecord *)r;
+- (void)configWith:(CHRecord *)r keyword:(NSString *)kw;
 @end
 
 @implementation CHRecCell
@@ -156,7 +184,7 @@
     return self;
 }
 
-- (void)configWith:(CHRecord *)r {
+- (void)configWith:(CHRecord *)r keyword:(NSString *)kw {
     UIColor *col = [CHTheme colorForLayer:r.layer];
     self.bar.backgroundColor = col;
     [CHTheme glow:self.bar color:col radius:4 opacity:0.85];
@@ -184,8 +212,8 @@
         self.algoL.hidden = YES;
     }
 
-    self.titleL.attributedText = [CHTheme tracked:r.title
-        font:[CHTheme mono:12.5 weight:UIFontWeightSemibold] color:CH_TEXT spacing:0.2];
+    self.titleL.attributedText = chHighlight(r.title, kw,
+        [CHTheme mono:12.5 weight:UIFontWeightSemibold], CH_TEXT, 0.2);
 
     // ★ 聚合次数角标
     if (r.count > 1) {
@@ -200,8 +228,8 @@
         self.countL.layer.shadowOpacity = 0;
     }
 
-    self.subL.attributedText = [CHTheme tracked:(r.subtitle ?: @"")
-        font:[CHTheme mono:10.5 weight:UIFontWeightRegular] color:CH_TEXT2 spacing:0.1];
+    self.subL.attributedText = chHighlight(r.subtitle ?: @"", kw,
+        [CHTheme mono:10.5 weight:UIFontWeightRegular], CH_TEXT2, 0.1);
 
     static NSDateFormatter *df = nil;
     static dispatch_once_t once;
@@ -214,8 +242,8 @@
 
     NSString *data = r.detail;
     self.dataBox.hidden = (data.length == 0);
-    self.dataL.attributedText = [CHTheme tracked:data ?: @""
-        font:[CHTheme mono:10.5 weight:UIFontWeightRegular] color:CH_TEXT spacing:0.0];
+    self.dataL.attributedText = chHighlight(data ?: @"", kw,
+        [CHTheme mono:10.5 weight:UIFontWeightRegular], CH_TEXT, 0.0);
 }
 
 @end
@@ -428,9 +456,12 @@
 - (void)showMore {
     UIAlertController *al = [UIAlertController alertControllerWithTitle:nil
         message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [al addAction:[UIAlertAction actionWithTitle:@"分享全部记录"
+    [al addAction:[UIAlertAction actionWithTitle:@"导出记录 (.txt)"
                           style:UIAlertActionStyleDefault
                         handler:^(UIAlertAction *a){ [self exportAll]; }]];
+    [al addAction:[UIAlertAction actionWithTitle:@"导出分析报告 (.md)"
+                          style:UIAlertActionStyleDefault
+                        handler:^(UIAlertAction *a){ [self exportReport]; }]];
     [al addAction:[UIAlertAction actionWithTitle:@"清空这个 App 的记录"
                           style:UIAlertActionStyleDestructive
                         handler:^(UIAlertAction *a){ [self confirmClearApp]; }]];
@@ -461,11 +492,164 @@
 }
 
 - (void)exportAll {
+    NSString *txt = [self buildText];
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                      [NSString stringWithFormat:@"%@_hook.txt", self.app.bid ?: @"records"]];
+    [txt writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [self shareFiles:@[[NSURL fileURLWithPath:path]]];
+}
+
+/// 生成可读的 txt 报告
+- (NSString *)buildText {
     NSMutableString *s = [NSMutableString string];
-    for (CHRecord *r in self.records)
-        [s appendFormat:@"[%@][%@] %@\n  %@\n  %@\n\n", r.layer, r.type, r.title, r.subtitle, r.detail];
+    NSDateFormatter *df = [NSDateFormatter new];
+    df.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+
+    [s appendString:@"========================================\n"];
+    [s appendFormat:@"  %@  ·  Hook 记录导出\n", self.app.name ?: @"App"];
+    [s appendFormat:@"  Bundle ID : %@\n", self.app.bid ?: @"?"];
+    [s appendFormat:@"  导出时间  : %@\n", [df stringFromDate:[NSDate date]]];
+    [s appendFormat:@"  记录条数  : %ld\n", (long)self.records.count];
+    [s appendString:@"========================================\n\n"];
+
+    NSInteger idx = 0;
+    for (CHRecord *r in self.records) {
+        idx++;
+        [s appendFormat:@"───────────────────────────────────────\n"];
+        [s appendFormat:@"[%ld] %@  (%@)\n", (long)idx, r.title, r.layer];
+        NSString *op = [r opTag], *algo = [r algoTag];
+        if (op.length)   [s appendFormat:@"  操作    : %@\n", op];
+        if (algo.length) [s appendFormat:@"  算法    : %@\n", algo];
+        [s appendFormat:@"  时间    : %@\n", [df stringFromDate:r.date]];
+        if (r.count > 1) [s appendFormat:@"  次数    : ×%ld\n", (long)r.count];
+
+        NSDictionary *raw = r.raw;
+        // 按语义顺序输出
+        NSArray *order = @[@"key", @"iv", @"text", @"inText", @"in", @"inLen",
+                           @"outText", @"out", @"outLen", @"mac", @"hash", @"data",
+                           @"url", @"method", @"status", @"reqText", @"req",
+                           @"respText", @"resp", @"error", @"src", @"caller"];
+        NSDictionary *names = @{
+            @"key":@"KEY", @"iv":@"IV", @"text":@"明文", @"inText":@"明文",
+            @"in":@"密文/输入", @"inLen":@"输入长度", @"outText":@"解密结果",
+            @"out":@"输出", @"outLen":@"输出长度", @"mac":@"HMAC", @"hash":@"HASH",
+            @"data":@"数据", @"url":@"URL", @"method":@"方法", @"status":@"状态码",
+            @"reqText":@"请求体", @"req":@"请求体", @"respText":@"响应体",
+            @"resp":@"响应体", @"error":@"错误", @"src":@"来源", @"caller":@"调用者"
+        };
+        for (NSString *k in order) {
+            id v = raw[k];
+            if (!v) continue;
+            NSString *sv = [v isKindOfClass:[NSString class]] ? v : [v description];
+            if (sv.length == 0) continue;
+            [s appendFormat:@"  %-8s: %@\n", [names[k] UTF8String], sv];
+        }
+        NSArray *bt = raw[@"bt"];
+        if ([bt isKindOfClass:[NSArray class]] && bt.count) {
+            [s appendString:@"  调用栈  :\n"];
+            for (NSInteger i = 0; i < (NSInteger)bt.count; i++)
+                [s appendFormat:@"      %2ld  %@\n", (long)i, bt[i]];
+        }
+        [s appendString:@"\n"];
+    }
+    [s appendString:@"—— 由 AzbcpxTuT 导出 ——\n"];
+    return s;
+}
+
+/// 生成 Markdown 分析报告
+- (void)exportReport {
+    NSDateFormatter *df = [NSDateFormatter new];
+    df.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    NSMutableString *m = [NSMutableString string];
+
+    [m appendFormat:@"# %@ — Hook 分析报告\n\n", self.app.name ?: @"App"];
+    [m appendFormat:@"- **Bundle ID**: `%@`\n", self.app.bid ?: @"?"];
+    [m appendFormat:@"- **导出时间**: %@\n", [df stringFromDate:[NSDate date]]];
+    [m appendFormat:@"- **记录条数**: %ld\n", (long)self.records.count];
+    [m appendString:@"- **工具**: AzbcpxTuT\n\n"];
+
+    // ── ① 域名 / URL ──
+    NSMutableOrderedSet *urls = [NSMutableOrderedSet orderedSet];
+    for (CHRecord *r in self.records) {
+        NSString *u = r.raw[@"url"];
+        if ([u isKindOfClass:[NSString class]] && u.length) [urls addObject:u];
+        NSString *t = r.raw[@"text"];
+        if ([t isKindOfClass:[NSString class]] &&
+            ([t hasPrefix:@"http"] || [t containsString:@".com"] || [t containsString:@".cn"]))
+            [urls addObject:t];
+    }
+    if (urls.count) {
+        [m appendString:@"## 域名 / URL\n\n```\n"];
+        for (NSString *u in urls) [m appendFormat:@"%@\n", u];
+        [m appendString:@"```\n\n"];
+    }
+
+    // ── ② 算法与密钥 ──
+    NSMutableOrderedSet *algos = [NSMutableOrderedSet orderedSet];
+    NSMutableOrderedSet *keys  = [NSMutableOrderedSet orderedSet];
+    NSMutableOrderedSet *ivs   = [NSMutableOrderedSet orderedSet];
+    for (CHRecord *r in self.records) {
+        NSString *a = [r algoTag];
+        if (a.length) [algos addObject:a];
+        NSString *k = r.raw[@"key"];
+        if ([k isKindOfClass:[NSString class]] && k.length) [keys addObject:k];
+        NSString *v = r.raw[@"iv"];
+        if ([v isKindOfClass:[NSString class]] && v.length) [ivs addObject:v];
+    }
+    [m appendString:@"## 加密算法\n\n"];
+    if (algos.count) { for (NSString *a in algos) [m appendFormat:@"- `%@`\n", a]; }
+    else [m appendString:@"- （无）\n"];
+    [m appendString:@"\n"];
+
+    if (keys.count) {
+        [m appendString:@"## 密钥 KEY\n\n```\n"];
+        for (NSString *k in keys) [m appendFormat:@"%@\n", k];
+        [m appendString:@"```\n\n"];
+    }
+    if (ivs.count) {
+        [m appendString:@"## 初始向量 IV\n\n```\n"];
+        for (NSString *v in ivs) [m appendFormat:@"%@\n", v];
+        [m appendString:@"```\n\n"];
+    }
+
+    // ── ③ Hook 点（调用栈）──
+    NSMutableOrderedSet *hooks = [NSMutableOrderedSet orderedSet];
+    for (CHRecord *r in self.records) {
+        NSArray *bt = r.raw[@"bt"];
+        if ([bt isKindOfClass:[NSArray class]] && bt.count) [hooks addObject:bt.firstObject];
+        else if (r.raw[@"caller"]) [hooks addObject:r.raw[@"caller"]];
+    }
+    if (hooks.count) {
+        [m appendString:@"## Hook 点（调用位置）\n\n```\n"];
+        for (NSString *h in hooks) [m appendFormat:@"%@\n", h];
+        [m appendString:@"```\n\n"];
+    }
+
+    // ── ④ 时间线（前 100 条）──
+    [m appendString:@"## 时间线\n\n```\n"];
+    NSInteger n = 0;
+    for (CHRecord *r in self.records) {
+        if (++n > 100) { [m appendString:@"...\n"]; break; }
+        [m appendFormat:@"%@  [%@] %-16s %@\n",
+         [df stringFromDate:r.date], r.layer, [[r title] UTF8String], r.subtitle ?: @""];
+    }
+    [m appendString:@"```\n\n"];
+
+    [m appendString:@"---\n\n*由 AzbcpxTuT 自动生成*\n"];
+
+    NSString *name = [NSString stringWithFormat:@"%@_report.md", self.app.bid ?: @"report"];
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+    [m writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [self shareFiles:@[[NSURL fileURLWithPath:path]]];
+}
+
+- (void)shareFiles:(NSArray *)items {
     UIActivityViewController *av = [[UIActivityViewController alloc]
-        initWithActivityItems:@[s] applicationActivities:nil];
+        initWithActivityItems:items applicationActivities:nil];
+    if (av.popoverPresentationController) {
+        av.popoverPresentationController.sourceView = self.view;
+        av.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width - 30, 40, 1, 1);
+    }
     [self presentViewController:av animated:YES completion:nil];
 }
 
@@ -476,7 +660,7 @@
     static NSString *cid = @"rec";
     CHRecCell *c = [t dequeueReusableCellWithIdentifier:cid];
     if (!c) c = [[CHRecCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cid];
-    [c configWith:self.records[ip.row]];
+    [c configWith:self.records[ip.row] keyword:self.keyword];
     return c;
 }
 
