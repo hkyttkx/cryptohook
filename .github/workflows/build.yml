@@ -33,7 +33,7 @@ jobs:
             -install_name @executable_path/Frameworks/CryptoHook.dylib > dylib.log 2>&1
           EXIT=$?
           cat dylib.log
-          [ $EXIT -ne 0 ] && { tail -25 dylib.log | grep -v '^$' | while IFS= read -r l; do echo "::error title=clang-dylib::$l"; done; exit 1; }
+          [ $EXIT -ne 0 ] && { grep -E "error:" dylib.log | head -30 | while IFS= read -r l; do echo "::error title=clang-dylib::$l"; done; tail -8 dylib.log | grep -v '^$' | while IFS= read -r l; do echo "::error title=tail::$l"; done; exit 1; }
           ldid -S dist/CryptoHook.dylib || true
 
       - name: Build app
