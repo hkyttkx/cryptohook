@@ -154,6 +154,9 @@ static NSString *tryUTF8(const void *p, size_t n) {
     if (c < 0x09) return nil;
     return s;
 }
+// 前向声明（base 里要用，定义在后面）
+static NSArray<NSString *> *fullBacktrace(int skip);
+
 static NSMutableDictionary *base(NSString *layer, NSString *type) {
     NSMutableDictionary *d = [@{
         @"t":  @([NSDate date].timeIntervalSince1970),
