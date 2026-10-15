@@ -30,11 +30,15 @@ static NSDate *gCfgTime = nil;
 #define CFG_PATH @"/var/mobile/Library/CryptoHook/config.plist"
 
 static void cfgRefresh(void) {
-    // 最多每 5 秒重读一次，允许 App 里改完立刻生效
-    if (gCfg && gCfgTime && -[gCfgTime timeIntervalSinceNow] < 5.0) return;
-    NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:CFG_PATH];
-    gCfg = d ?: @{};
-    gCfgTime = [NSDate date];
+    @try {
+        // 最多每 5 秒重读一次，允许 App 里改完立刻生效
+        if (gCfg && gCfgTime && -[gCfgTime timeIntervalSinceNow] < 5.0) return;
+        NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:CFG_PATH];
+        gCfg = (d && [d isKindOfClass:[NSDictionary class]]) ? d : @{};
+        gCfgTime = [NSDate date];
+    } @catch (NSException *e) {
+        gCfg = @{}; gCfgTime = [NSDate date];
+    }
 }
 static BOOL cfgOn(NSString *key) {
     cfgRefresh();
@@ -90,6 +94,7 @@ static void logSetup(void) {
 
 static void logJSON(NSDictionary *rec) {
     if (!rec) return;
+    @try {
     pthread_mutex_lock(&gLock);
     logSetup();
     if (gFp) {
@@ -107,6 +112,7 @@ static void logJSON(NSDictionary *rec) {
         }
     }
     pthread_mutex_unlock(&gLock);
+    } @catch (__unused NSException *e) {}
 }
 
 // 噪声抑制：同类记录最多 N 条/秒
@@ -157,20 +163,25 @@ static NSDictionary *base(NSString *layer, NSString *type) {
         @"type":type
     } mutableCopy];
     // ★ 完整调用栈（过滤系统噪音，最多 12 帧）
-    NSArray *bt = fullBacktrace(3);
-    if (bt.count) {
-        d[@"bt"] = bt;
-        d[@"caller"] = bt.firstObject;   // 兼容旧字段
-    }
+    @try {
+        NSArray *bt = fullBacktrace(3);
+        if (bt.count) {
+            d[@"bt"] = bt;
+            d[@"caller"] = bt.firstObject;   // 兼容旧字段
+        }
+    } @catch (__unused NSException *e) {}
     return d;
 }
 static void emit(NSMutableDictionary *rec) {
-    logJSON(rec);
-    NSLog(@"[CryptoHook] %@", rec);
+    @try {
+        logJSON(rec);
+        NSLog(@"[CryptoHook] %@", rec);
+    } @catch (__unused NSException *e) {}
 }
 
 // 调用栈：完整帧列表（过滤系统库噪音），返回字符串数组
 static NSArray<NSString *> *fullBacktrace(int skip) {
+    @try {
     void *bt[64];
     int n = backtrace(bt, 64);
     if (n <= 0) return nil;
@@ -189,6 +200,7 @@ static NSArray<NSString *> *fullBacktrace(int skip) {
                         sym, off, bt[i], [f lastPathComponent]]];
     }
     return out.count ? out : nil;
+    } @catch (__unused NSException *e) { return nil; }
 }
 
 // 摘要：第一个非系统帧（兼容旧的 caller 字段）
