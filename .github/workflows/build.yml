@@ -49,6 +49,7 @@ jobs:
             viewer/main.m viewer/CHTheme.m viewer/CHModels.m \
             viewer/CHServices.m viewer/CHRootVC.m viewer/CHDetailVC.m \
             viewer/CHSplashVC.m viewer/CHRecordDetailVC.m \
+            viewer/CHSettingsVC.m \
             -framework UIKit -framework Foundation \
             -framework QuartzCore -framework CoreGraphics > app.log 2>&1
           EXIT=$?
