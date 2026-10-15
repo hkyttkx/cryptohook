@@ -3,42 +3,66 @@
 
 @implementation CHTheme
 
-+ (UIColor *)bg {
-    if (@available(iOS 13.0, *)) return [UIColor systemGroupedBackgroundColor];
-    return [UIColor colorWithWhite:0.95 alpha:1];
++ (UIColor *)bg     { return CH_BG; }
++ (UIColor *)card   { return CH_CARD; }
++ (UIColor *)line   { return CH_LINE; }
++ (UIColor *)text   { return CH_TEXT; }
++ (UIColor *)sub    { return CH_SUB; }
++ (UIColor *)accent { return CH_ACCENT; }
+
++ (UIFont *)mono:(CGFloat)size weight:(UIFontWeight)w {
+    UIFont *f = [UIFont monospacedSystemFontOfSize:size weight:w];
+    return f ?: [UIFont fontWithName:@"Menlo" size:size];
 }
-+ (UIColor *)card {
-    if (@available(iOS 13.0, *)) return [UIColor secondarySystemGroupedBackgroundColor];
-    return [UIColor whiteColor];
++ (UIFont *)monoBold:(CGFloat)size {
+    return [self mono:size weight:UIFontWeightBold];
 }
-+ (UIColor *)cardBorder {
-    return [UIColor separatorColor];
-}
-+ (UIColor *)text {
-    return [UIColor labelColor];
-}
-+ (UIColor *)sub {
-    return [UIColor secondaryLabelColor];
-}
-+ (UIColor *)accent {
-    return [UIColor colorWithRed:0.20 green:0.55 blue:1.00 alpha:1.0];
+
++ (NSAttributedString *)tracked:(NSString *)s font:(UIFont *)f color:(UIColor *)c spacing:(CGFloat)sp {
+    return [[NSAttributedString alloc] initWithString:s ?: @"" attributes:@{
+        NSFontAttributeName: f,
+        NSForegroundColorAttributeName: c,
+        NSKernAttributeName: @(sp)
+    }];
 }
 
 + (UIColor *)colorForLayer:(NSString *)layer {
-    if ([layer isEqualToString:@"L1"]) return [UIColor systemBlueColor];      // 系统加密
-    if ([layer isEqualToString:@"L2"]) return [UIColor systemGreenColor];     // 明文
-    if ([layer isEqualToString:@"L3"]) return [UIColor systemOrangeColor];    // 网络
-    if ([layer isEqualToString:@"L4"]) return [UIColor systemPurpleColor];    // 自研
-    if ([layer isEqualToString:@"SYS"]) return [UIColor systemGrayColor];
-    return [UIColor systemTealColor];
+    if ([layer isEqualToString:@"L1"]) return CH_BLUE;    // 系统加密
+    if ([layer isEqualToString:@"L2"]) return CH_ACCENT;  // 明文
+    if ([layer isEqualToString:@"L3"]) return CH_ORANGE;  // 网络
+    if ([layer isEqualToString:@"L4"]) return CH_PURPLE;  // 自研
+    return CH_SUB;
 }
 
 + (NSString *)symbolForLayer:(NSString *)layer {
-    if ([layer isEqualToString:@"L1"]) return @"lock.shield.fill";
+    if ([layer isEqualToString:@"L1"]) return @"lock.fill";
     if ([layer isEqualToString:@"L2"]) return @"text.alignleft";
-    if ([layer isEqualToString:@"L3"]) return @"arrow.left.arrow.right";
+    if ([layer isEqualToString:@"L3"]) return @"bolt.horizontal.fill";
     if ([layer isEqualToString:@"L4"]) return @"cpu";
-    return @"gearshape.fill";
+    return @"circle.fill";
+}
+
++ (NSString *)nameForLayer:(NSString *)layer {
+    if ([layer isEqualToString:@"L1"]) return @"SYS CRYPTO";
+    if ([layer isEqualToString:@"L2"]) return @"PLAIN";
+    if ([layer isEqualToString:@"L3"]) return @"NET";
+    if ([layer isEqualToString:@"L4"]) return @"CUSTOM";
+    return @"SYS";
+}
+
++ (void)glow:(UIView *)v color:(UIColor *)c radius:(CGFloat)r opacity:(CGFloat)o {
+    v.layer.shadowColor = c.CGColor;
+    v.layer.shadowRadius = r;
+    v.layer.shadowOpacity = o;
+    v.layer.shadowOffset = CGSizeZero;
+}
+
++ (void)strokeCard:(UIView *)v {
+    v.layer.borderColor = CH_LINE.CGColor;
+    v.layer.borderWidth = 1.0 / [UIScreen mainScreen].scale;
+    v.layer.cornerRadius = 12;
+    v.layer.cornerCurve = kCACornerCurveContinuous;
+    v.backgroundColor = CH_CARD;
 }
 
 @end
