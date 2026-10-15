@@ -52,7 +52,6 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 @property (nonatomic, strong) UILabel     *subL;
 @property (nonatomic, strong) UIView      *dataBox;
 @property (nonatomic, strong) UILabel     *dataL;
-@property (nonatomic, strong) UILabel     *dupL;      // 子项序号/时间
 @property (nonatomic, assign) CGFloat      leadingShift;  // 子项缩进
 @property (nonatomic, assign) BOOL         alphaDim;      // 子项变暗
 - (void)configWith:(CHRecord *)r keyword:(NSString *)kw;
@@ -112,11 +111,6 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
         _countL.hidden = YES;
         _countL.translatesAutoresizingMaskIntoConstraints = NO;
         [_card addSubview:_countL];
-
-        _dupL = [UILabel new];
-        _dupL.hidden = YES;
-        _dupL.translatesAutoresizingMaskIntoConstraints = NO;
-        [_card addSubview:_dupL];
 
         _subL = [UILabel new];
         _subL.numberOfLines = 2;
@@ -248,20 +242,7 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     self.timeL.attributedText = [CHTheme tracked:[df stringFromDate:r.date]
         font:[CHTheme mono:9.5 weight:UIFontWeightRegular] color:CH_SUB spacing:0.1];
 
-    // ★ 展开出来的子项：缩进 + 显示时间 + 变暗
-    if (self.leadingShift > 0 || self.alphaDim) {
-        self.dupL.hidden = NO;
-        NSDateFormatter *tf = [NSDateFormatter new];
-        tf.dateFormat = @"HH:mm:ss.SSS";
-        self.dupL.attributedText = [CHTheme tracked:[NSString stringWithFormat:@"└ %@", [tf stringFromDate:r.date]]
-            font:[CHTheme mono:9.5 weight:UIFontWeightRegular] color:CH_SUB spacing:0.2];
-        self.alphaDim ? (self.card.alpha = 0.72) : (self.card.alpha = 1.0);
-        // 数据区在小项里不显示（省空间）
-        self.dataBox.hidden = YES;
-        self.subL.hidden = YES;
-        return;
-    }
-    self.dupL.hidden = YES;
+    // 子项已由 CHDupCell 负责，主 cell 一律正常渲染
     self.card.alpha = 1.0;
     self.subL.hidden = NO;
 
@@ -943,7 +924,7 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return self.rows.count; }
 
 - (CGFloat)tableView:(UITableView *)t heightForRowAtIndexPath:(NSIndexPath *)ip {
-    if ([self rowIsDupAt:ip]) return 46;   // ★ 子项紧凑固定高
+    if ([self rowIsDupAt:ip]) return 44;   // ★ 子项紧凑固定高
     return UITableViewAutomaticDimension;
 }
 
@@ -961,9 +942,9 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
         [dc configWith:rec idx:di color:[CHTheme colorForLayer:rec.layer]];
         return dc;
     }
-    [c configWith:rec keyword:self.keyword];
     c.leadingShift = 0;
     c.alphaDim = NO;
+    [c configWith:rec keyword:self.keyword];
     return c;
 }
 
