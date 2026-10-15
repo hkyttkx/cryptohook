@@ -465,9 +465,12 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 
 - (void)chipTapped:(CHChip *)c {
     if ([c.key isEqualToString:@"SESS"]) {
+        // 「会话」是显示模式，跟分类互斥
         self.groupBySession = !self.groupBySession;
+        if (self.groupBySession) self.filter = nil;   // 选会话 -> 清掉分类
     } else {
         self.filter = c.key.length ? c.key : nil;
+        self.groupBySession = NO;                     // 选分类 -> 关掉会话
     }
     [self paintChips];
     [self applyFilter];
