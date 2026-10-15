@@ -183,48 +183,42 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
     }
 }
 
-#pragma mark - 导出 dylib
+#pragma mark - 导出 dylib（直接分享，不落地保存）
 - (void)exportDylib {
     @try {
         NSString *src = [[NSBundle mainBundle] pathForResource:@"CryptoHook" ofType:@"dylib"];
-        if (!src) {
-            // 兜底：直接按 bundle 路径拼
+        if (!src)
             src = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"CryptoHook.dylib"];
-        }
         NSFileManager *fm = [NSFileManager defaultManager];
         if (![fm fileExistsAtPath:src]) {
             [self toast:@"包里找不到 CryptoHook.dylib"];
             return;
         }
-        // 目标目录（越狱常见可写位置，优先 /var/mobile/Documents）
-        NSString *outDir = nil;
-        for (NSString *d in @[@"/var/mobile/Documents",
-                              @"/var/mobile/Library/CryptoHook",
-                              NSTemporaryDirectory()]) {
-            if (!d) continue;
-            [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
-            if ([fm isWritableFileAtPath:d]) { outDir = d; break; }
-        }
-        if (!outDir) { [self toast:@"没有可写目录"]; return; }
 
-        NSString *dst = [outDir stringByAppendingPathComponent:@"CryptoHook.dylib"];
+        // 只放临时目录（系统会自动清理），不做"保存"
+        NSString *tmpDir = NSTemporaryDirectory();
+        NSString *dst = [tmpDir stringByAppendingPathComponent:@"CryptoHook.dylib"];
         [fm removeItemAtPath:dst error:nil];
         NSError *err = nil;
         if (![fm copyItemAtPath:src toPath:dst error:&err]) {
-            [self toast:[NSString stringWithFormat:@"复制失败: %@", err.localizedDescription]];
+            [self toast:[NSString stringWithFormat:@"准备失败: %@", err.localizedDescription]];
             return;
         }
-        // 顺手把当前配置也导出（导出后默认值跟着走）
-        NSString *cfgDst = [outDir stringByAppendingPathComponent:@"CryptoHook-config.plist"];
-        [self.cfg writeToFile:cfgDst atomically:YES];
 
-        [self toast:[NSString stringWithFormat:@"已导出到\n%@", dst]];
+        // ★ 直接弹分享（跟系统分享一样）
+        NSMutableArray *items = [NSMutableArray arrayWithObject:[NSURL fileURLWithPath:dst]];
+        // 附一份当前配置，便于别人拿到同样的默认开关
+        NSString *cfgTmp = [tmpDir stringByAppendingPathComponent:@"CryptoHook-config.plist"];
+        if ([self.cfg writeToFile:cfgTmp atomically:YES])
+            [items addObject:[NSURL fileURLWithPath:cfgTmp]];
 
         UIActivityViewController *av = [[UIActivityViewController alloc]
-            initWithActivityItems:@[[NSURL fileURLWithPath:dst]] applicationActivities:nil];
-        av.popoverPresentationController.sourceView = self.view;
-        av.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
-                                                                 self.view.bounds.size.height/2, 1, 1);
+            initWithActivityItems:items applicationActivities:nil];
+        if (av.popoverPresentationController) {
+            av.popoverPresentationController.sourceView = self.view;
+            av.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
+                                                                     self.view.bounds.size.height/2, 1, 1);
+        }
         [self presentViewController:av animated:YES completion:nil];
     } @catch (NSException *e) {
         [self toast:[NSString stringWithFormat:@"异常: %@", e.reason]];
