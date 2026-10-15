@@ -194,6 +194,8 @@
     self.table.backgroundColor = [UIColor clearColor];
     self.table.separatorStyle = UITableViewCellSeparatorStyleNone;
     if (@available(iOS 15.0, *)) self.table.sectionHeaderTopPadding = 0;
+    self.table.sectionHeaderHeight = 38;                    // ★ 显式高度（吸顶更可靠）
+    self.table.estimatedSectionHeaderHeight = 38;
     self.table.rowHeight = 74;
     self.table.contentInset = UIEdgeInsetsMake(8, 0, 40, 0);
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
@@ -289,9 +291,22 @@
         l.tag = 991;
         l.translatesAutoresizingMaskIntoConstraints = NO;
         [v.contentView addSubview:l];
+
+        // 底部细分割线（视觉上把标题和内容分开）
+        UIView *sep = [UIView new];
+        sep.tag = 992;
+        sep.backgroundColor = CH_LINE;
+        sep.translatesAutoresizingMaskIntoConstraints = NO;
+        [v.contentView addSubview:sep];
+
         [NSLayoutConstraint activateConstraints:@[
             [l.leadingAnchor constraintEqualToAnchor:v.contentView.leadingAnchor constant:22],
-            [l.bottomAnchor constraintEqualToAnchor:v.contentView.bottomAnchor constant:-6],
+            [l.bottomAnchor constraintEqualToAnchor:v.contentView.bottomAnchor constant:-8],
+
+            [sep.leadingAnchor constraintEqualToAnchor:v.contentView.leadingAnchor constant:22],
+            [sep.trailingAnchor constraintEqualToAnchor:v.contentView.trailingAnchor constant:-22],
+            [sep.bottomAnchor constraintEqualToAnchor:v.contentView.bottomAnchor],
+            [sep.heightAnchor constraintEqualToConstant:1.0/[UIScreen mainScreen].scale],
         ]];
     }
     l.attributedText = [CHTheme tracked:txt
@@ -299,7 +314,7 @@
         color:(s == 0 ? CH_ACCENT : CH_SUB) spacing:1.2];
     return v;
 }
-- (CGFloat)tableView:(UITableView *)t heightForHeaderInSection:(NSInteger)s { return 34; }
+- (CGFloat)tableView:(UITableView *)t heightForHeaderInSection:(NSInteger)s { return 38; }
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
     return s == 0 ? self.hooked.count : self.others.count;
