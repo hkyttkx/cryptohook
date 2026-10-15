@@ -26,6 +26,7 @@
 // 配置（由 CryptoViewer 写入；dylib 优先读【自己沙盒】，其次共享目录）
 // ============================================================
 static NSDictionary *gCfg = nil;
+static unsigned long gDropCount = 0;   // 被黑名单丢弃的条数
 static uint64_t gCfgTick = 0;
 static double   gTickScale = 0;
 static BOOL     gSlowStack = NO;
