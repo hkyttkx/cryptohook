@@ -199,10 +199,11 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
             font:[CHTheme mono:13 weight:UIFontWeightBold] color:col spacing:1.6];
         l;
     });
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"]
-                style:UIBarButtonItemStylePlain target:self action:@selector(shareAll)];
-    self.navigationItem.rightBarButtonItem.tintColor = CH_ACCENT;
+    UIBarButtonItem *more = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
+                style:UIBarButtonItemStylePlain target:self action:@selector(showActions)];
+    more.tintColor = CH_ACCENT;
+    self.navigationItem.rightBarButtonItem = more;
 
     self.scroll = [[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scroll.alwaysBounceVertical = YES;
@@ -441,6 +442,76 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     for (NSUInteger i = 0; i < lim; i++) [o appendFormat:@"%02x", b[i]];
     if (d.length > lim) [o appendFormat:@"…(%luB)", (unsigned long)d.length];
     return o;
+}
+
+#pragma mark - 操作菜单
+- (void)showActions {
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:nil message:nil
+        preferredStyle:UIAlertControllerStyleActionSheet];
+
+    [al addAction:[UIAlertAction actionWithTitle:@"分享这条记录 (.txt)"
+                          style:UIAlertActionStyleDefault
+                        handler:^(UIAlertAction *a){ [self shareAll]; }]];
+
+    // ── 过滤选项（按内容特征加黑名单）──
+    NSDictionary *r = self.record.raw;
+    NSString *t = self.record.type;
+    NSString *u = r[@"url"];
+    NSString *c = r[@"caller"];
+
+    if (t.length) {
+        [al addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"过滤掉类型「%@」", t]
+                              style:UIAlertActionStyleDestructive
+                            handler:^(UIAlertAction *a){ [self addExclude:@"excludeTypes" value:t]; }]];
+    }
+    if ([u isKindOfClass:[NSString class]] && u.length) {
+        NSURL *uu = [NSURL URLWithString:u];
+        NSString *host = uu.host ?: u;
+        [al addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"过滤掉域名「%@」", host]
+                              style:UIAlertActionStyleDestructive
+                            handler:^(UIAlertAction *a){ [self addExclude:@"excludeUrls" value:host]; }]];
+    }
+    if ([c isKindOfClass:[NSString class]] && c.length) {
+        // 取调用点的函数名部分（去掉 +0x... 和 @0x...）
+        NSString *sym = c;
+        NSRange r1 = [sym rangeOfString:@" +0x"];
+        if (r1.location != NSNotFound) sym = [sym substringToIndex:r1.location];
+        if (sym.length) {
+            [al addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"过滤掉调用点「%@」", sym]
+                                  style:UIAlertActionStyleDestructive
+                                handler:^(UIAlertAction *a){ [self addExclude:@"excludeCallers" value:sym]; }]];
+        }
+    }
+
+    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if (al.popoverPresentationController) al.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    [self presentViewController:al animated:YES completion:nil];
+}
+
+/// 加一条黑名单（写入共享 config.plist）
+- (void)addExclude:(NSString *)key value:(NSString *)v {
+    NSString *path = @"/var/mobile/Library/CryptoHook/config.plist";
+    NSMutableDictionary *cfg = [NSMutableDictionary dictionaryWithContentsOfFile:path] ?: [NSMutableDictionary dictionary];
+    NSMutableArray *arr = [NSMutableArray arrayWithArray:cfg[key] ?: @[]];
+    if (![arr containsObject:v]) [arr addObject:v];
+    // 同时写共享目录 + 该 App 沙盒（让 dylib 读得到）
+    cfg[key] = arr;
+    [[NSFileManager defaultManager] createDirectoryAtPath:@"/var/mobile/Library/CryptoHook"
+        withIntermediateDirectories:YES attributes:nil error:nil];
+    [cfg writeToFile:path atomically:YES];
+    // 同步到该 App 沙盒
+    NSString *home = NSHomeDirectory();
+    if (home) {
+        NSString *d = [home stringByAppendingPathComponent:@"Documents/CryptoHook"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+        [cfg writeToFile:[d stringByAppendingPathComponent:@"config.plist"] atomically:YES];
+    }
+    UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"已过滤"
+        message:[NSString stringWithFormat:@"%@ 已加入黑名单，之后不再记录。\n
+可在「设置 → 过滤规则」里移除。", v]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [ok addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:ok animated:YES completion:nil];
 }
 
 - (void)shareAll {
