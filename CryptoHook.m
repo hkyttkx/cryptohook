@@ -12,6 +12,7 @@
 #import <objc/message.h>
 #include <CommonCrypto/CommonCrypto.h>
 #include <CommonCrypto/CommonHMAC.h>
+#include <CommonCrypto/CommonDigest.h>
 #include <Security/Security.h>
 #include <execinfo.h>
 #include <dlfcn.h>
@@ -24,6 +25,24 @@
 #include <mach/vm_map.h>
 #include <mach/mach.h>
 #include <mach/vm_region.h>
+
+// ── SPI（私有 API）：公共头文件里没有，手动声明原型 ──
+//   这些符号在运行时存在，只是没有公开声明
+typedef uint32_t CCDigestAlgorithm;
+extern int CCDigest(CCDigestAlgorithm alg, const uint8_t *data, size_t len, uint8_t *md);
+
+extern CCCryptorStatus CCCryptorGCM(CCOperation op, CCAlgorithm alg,
+    const void *key, size_t keyLen, const void *iv, size_t ivLen,
+    const void *aData, size_t aDataLen, const void *dataIn, size_t dataInLen,
+    void *dataOut, void *tagOut);
+
+extern int CCCryptorGCMOneshotEncrypt(CCAlgorithm alg, const void *key, size_t keyLen,
+    const void *iv, size_t ivLen, const void *aData, size_t aDataLen,
+    const void *p, size_t pLen, void *c, void *tag);
+
+extern int CCCryptorGCMOneshotDecrypt(CCAlgorithm alg, const void *key, size_t keyLen,
+    const void *iv, size_t ivLen, const void *aData, size_t aDataLen,
+    const void *c, size_t cLen, void *p, const void *tag);
 
 // ── 开源 hook 引擎 ──
 #include "third_party/fishhook.h"          // facebook/fishhook：重绑定 __la_symbol_ptr
