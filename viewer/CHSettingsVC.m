@@ -48,6 +48,43 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
     c[@"rate"] = disk[@"rate"] ?: @200;
     self.cfg = c;
 
+    // ── 个人卡片（圆形头像 + 介绍）──
+    CGFloat W = [UIScreen mainScreen].bounds.size.width;
+    UIView *head = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, 170)];
+    head.backgroundColor = [UIColor clearColor];
+
+    CGFloat S = 76;
+    UIView *avatarWrap = [[UIView alloc] initWithFrame:CGRectMake((W - S) / 2, 14, S, S)];
+    [CHTheme glow:avatarWrap color:CH_ACCENT radius:12 opacity:0.40];
+
+    UIImageView *avatar = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, S, S)];
+    avatar.contentMode = UIViewContentModeScaleAspectFill;
+    avatar.clipsToBounds = YES;
+    avatar.layer.cornerRadius = S / 2.0;
+    avatar.layer.cornerCurve = kCACornerCurveCircular;
+    avatar.layer.borderWidth = 1.5;
+    avatar.layer.borderColor = [CH_ACCENT colorWithAlphaComponent:0.55].CGColor;
+    UIImage *img = [UIImage imageNamed:@"splash"];
+    if (!img) {
+        NSString *p = [[NSBundle mainBundle] pathForResource:@"splash" ofType:@"jpg"];
+        if (p) img = [UIImage imageWithContentsOfFile:p];
+    }
+    avatar.image = img;
+    [avatarWrap addSubview:avatar];
+    [head addSubview:avatarWrap];
+
+    UILabel *slogan = [[UILabel alloc] initWithFrame:CGRectMake(20, S + 22, W - 40, 24)];
+    slogan.textAlignment = NSTextAlignmentCenter;
+    slogan.attributedText = [CHTheme tracked:@"Az 大哥 bcpx 牛逼"
+        font:[CHTheme mono:15 weight:UIFontWeightBold] color:CH_ACCENT spacing:1.6];
+    [head addSubview:slogan];
+
+    UILabel *by = [[UILabel alloc] initWithFrame:CGRectMake(20, S + 48, W - 40, 18)];
+    by.textAlignment = NSTextAlignmentCenter;
+    by.attributedText = [CHTheme tracked:@"AzbcpxTuT v1.0 · 通用加解密透视工具"
+        font:[CHTheme mono:9.5 weight:UIFontWeightMedium] color:CH_SUB spacing:1.2];
+    [head addSubview:by];
+
     self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.table.dataSource = self;
     self.table.delegate = self;
@@ -56,6 +93,8 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
     self.table.separatorColor = CH_LINE;
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.table];
+    self.table.tableHeaderView = head;
+    self.table.contentInset = UIEdgeInsetsMake(0, 0, 40, 0);
     [NSLayoutConstraint activateConstraints:@[
         [self.table.topAnchor constraintEqualToAnchor:self.view.topAnchor],
         [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
