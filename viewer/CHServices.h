@@ -16,6 +16,11 @@
 /// 清空某个 App 的全部日志文件
 + (NSInteger)clearApp:(CHApp *)app;
 
+/// 诊断：该 App 的日志文件路径
++ (NSArray<NSString *> *)rawLogPathsForApp:(CHApp *)app;
+/// 诊断：读取日志文件原始内容
++ (NSString *)rawTextOfFile:(NSString *)path;
+
 /// App 图标：先读 bundle 里的图标文件，再退到私有 API
 + (UIImage *)iconForBundlePath:(NSString *)bundlePath bid:(NSString *)bid;
 @end
