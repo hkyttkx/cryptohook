@@ -259,6 +259,11 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 @property (nonatomic, copy)   NSString *filter;   // nil=全部
 @property (nonatomic, copy)   NSString *keyword;
 @property (nonatomic, strong) NSMutableArray<CHChip *> *chips;
+@property (nonatomic, strong) NSTimer *ticker;      // 实时刷新
+@property (nonatomic, assign) NSInteger timeRange;  // 0=全部 1=5分钟 2=1分钟
+@property (nonatomic, assign) BOOL groupBySession;  // 会话配对
+@property (nonatomic, strong) UIBarButtonItem *timeBtn;
+@property (nonatomic, assign) BOOL searchBarActive;
 @end
 
 @implementation CHDetailVC
@@ -302,7 +307,7 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 
     self.chips = [NSMutableArray array];
     NSArray *defs = @[@[@"全部", @""], @[@"加密", @"L1"], @[@"明文", @"L2"],
-                      @[@"网络", @"L3"], @[@"自研", @"L4"]];
+                      @[@"网络", @"L3"], @[@"自研", @"L4"], @[@"会话", @"SESS"]];
     CGFloat x = 14;
     for (NSArray *d in defs) {
         CHChip *c = [CHChip buttonWithType:UIButtonTypeCustom];
@@ -389,12 +394,64 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     more.tintColor = CH_ACCENT;
     self.navigationItem.rightBarButtonItem = more;
 
+    // ★ 时间范围按钮
+    self.timeBtn = [[UIBarButtonItem alloc] initWithTitle:@"全部"
+        style:UIBarButtonItemStylePlain target:self action:@selector(pickTimeRange)];
+    self.timeBtn.tintColor = CH_ACCENT;
+    self.navigationItem.leftBarButtonItem = self.timeBtn;
+
     [self load];
+    [self startTicker];
+}
+
+#pragma mark - 实时刷新
+- (void)startTicker {
+    self.ticker = [NSTimer scheduledTimerWithTimeInterval:2.0
+                                                  target:self
+                                                selector:@selector(tick)
+                                                userInfo:nil repeats:YES];
+}
+
+- (void)tick {
+    // 只在最前台、没在滚动、没在搜索时刷新，避免打断操作
+    if (!self.view.window) return;
+    if (self.table.isDragging || self.table.isDecelerating) return;
+    if (self.searchBarActive) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSArray *r = [CHScanner recordsForApp:self.app limit:8000 aggregate:YES];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (r.count == self.allRecords.count) return;   // 没变化就不刷
+            self.allRecords = r;
+            [self applyFilter];
+        });
+    });
+}
+
+#pragma mark - 时间范围
+- (void)pickTimeRange {
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"时间范围"
+        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *names = @[@"全部", @"最近 5 分钟", @"最近 1 分钟", @"最近 30 秒"];
+    for (NSInteger i = 0; i < names.count; i++) {
+        [al addAction:[UIAlertAction actionWithTitle:names[i]
+            style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            self.timeRange = i;
+            self.timeBtn.title = (i == 0) ? @"全部" : names[i];
+            [self applyFilter];
+        }]];
+    }
+    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if (al.popoverPresentationController) {
+        al.popoverPresentationController.barButtonItem = self.timeBtn;
+    }
+    [self presentViewController:al animated:YES completion:nil];
 }
 
 - (void)paintChips {
     for (CHChip *c in self.chips) {
-        BOOL sel = (c.key.length == 0 && self.filter.length == 0) ||
+        BOOL sel;
+        if ([c.key isEqualToString:@"SESS"]) sel = self.groupBySession;
+        else sel = (c.key.length == 0 && self.filter.length == 0) ||
                    (c.key.length && [c.key isEqualToString:self.filter]);
         UIColor *col = sel ? CH_ACCENT : CH_SUB;
         c.layer.borderColor = (sel ? [CH_ACCENT colorWithAlphaComponent:0.6] : CH_LINE).CGColor;
@@ -406,7 +463,11 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 }
 
 - (void)chipTapped:(CHChip *)c {
-    self.filter = c.key.length ? c.key : nil;
+    if ([c.key isEqualToString:@"SESS"]) {
+        self.groupBySession = !self.groupBySession;
+    } else {
+        self.filter = c.key.length ? c.key : nil;
+    }
     [self paintChips];
     [self applyFilter];
 }
@@ -415,12 +476,25 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     self.keyword = text.length ? text : nil;
     [self applyFilter];
 }
-- (void)searchBarSearchButtonClicked:(UISearchBar *)sb { [sb resignFirstResponder]; }
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)sb { self.searchBarActive = YES; }
+- (void)searchBarTextDidEndEditing:(UISearchBar *)sb { self.searchBarActive = NO; }
+- (void)searchBarSearchButtonClicked:(UISearchBar *)sb {
+    self.searchBarActive = NO;
+    [sb resignFirstResponder];
+}
 
 - (void)applyFilter {
     NSString *f = self.filter, *kw = self.keyword;
+
+    // 时间范围
+    NSTimeInterval cutoff = 0;
+    if (self.timeRange == 1) cutoff = [NSDate date].timeIntervalSince1970 - 300;
+    else if (self.timeRange == 2) cutoff = [NSDate date].timeIntervalSince1970 - 60;
+    else if (self.timeRange == 3) cutoff = [NSDate date].timeIntervalSince1970 - 30;
+
     NSMutableArray *out = [NSMutableArray array];
     for (CHRecord *r in self.allRecords) {
+        if (cutoff > 0 && r.lastT > 0 && r.lastT < cutoff) continue;
         if (f.length && ![r.layer isEqualToString:f]) continue;
         if (kw.length) {
             NSMutableString *hay = [NSMutableString string];
@@ -437,9 +511,30 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
         }
         [out addObject:r];
     }
+    // ★ 会话归组：把同一调用点的记录聚到一起（连续显示）
+    if (self.groupBySession) {
+        [out sortUsingComparator:^NSComparisonResult(CHRecord *a, CHRecord *b) {
+            NSString *ca = a.raw[@"caller"] ?: @"";
+            NSString *cb = b.raw[@"caller"] ?: @"";
+            NSComparisonResult r = [ca compare:cb];
+            if (r != NSOrderedSame) return r;
+            return a.t > b.t ? NSOrderedAscending : (a.t < b.t ? NSOrderedDescending : NSOrderedSame);
+        }];
+    }
+
     self.records = out;
     self.empty.hidden = (out.count > 0);
     [self.table reloadData];
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    [self.ticker invalidate]; self.ticker = nil;
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if (!self.ticker) [self startTicker];
 }
 
 - (void)load {
