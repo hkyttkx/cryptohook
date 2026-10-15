@@ -4,6 +4,7 @@
 #import "CHModels.h"
 #import "CHTheme.h"
 #import "CHDetailVC.h"
+#import "CHSettingsVC.h"
 
 #pragma mark - 渐变视图（layerClass 方案，避免 mask 白条）
 @interface CHGradientView : UIView
@@ -161,6 +162,13 @@
         l;
     });
 
+    // ★ 设置入口
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:@"gearshape"]
+                style:UIBarButtonItemStylePlain
+               target:self action:@selector(openSettings)];
+    self.navigationItem.rightBarButtonItem.tintColor = CH_ACCENT;
+
     // 顶部渐变光晕（用 CAGradientLayer 作 layerClass，避免 mask 白条）
     CHGradientView *halo = [CHGradientView new];
     halo.translatesAutoresizingMaskIntoConstraints = NO;
@@ -219,6 +227,11 @@
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self reload]; }
+
+- (void)openSettings {
+    CHSettingsVC *s = [CHSettingsVC new];
+    [self.navigationController pushViewController:s animated:YES];
+}
 
 - (void)reload {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
