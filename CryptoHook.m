@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <mach/mach_time.h>
+#include <mach/vm_map.h>
+#include <mach/mach.h>
 #include <mach/vm_region.h>
 
 // ============================================================
