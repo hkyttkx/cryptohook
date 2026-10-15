@@ -157,7 +157,7 @@
     // 标题（等宽 + 字距）
     self.navigationItem.titleView = ({
         UILabel *l = [UILabel new];
-        l.attributedText = [CHTheme tracked:@"CRYPTOHOOK"
+        l.attributedText = [CHTheme tracked:@"AzbcpxTuT"
             font:[CHTheme mono:15 weight:UIFontWeightBold] color:CH_ACCENT spacing:2.0];
         l;
     });
