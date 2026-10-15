@@ -273,30 +273,16 @@
         : (self.others.count ? [NSString stringWithFormat:@"○ 其他应用 · %lu", (unsigned long)self.others.count] : nil);
     if (!txt) return nil;
 
-    static NSString *hid = @"hdr";
-    UITableViewHeaderFooterView *v = [t dequeueReusableHeaderFooterViewWithIdentifier:hid];
-    if (!v) {
-        v = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:hid];
-        v.backgroundView = nil;                        // ★ 保持透明（最初的样子）
-        v.contentView.backgroundColor = [UIColor clearColor];
-    }
+    // ★ 普通 UIView + 全透明（最初的样子）
+    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0, 0, t.bounds.size.width, 34)];
+    v.backgroundColor = [UIColor clearColor];
 
-    UILabel *l = [v.contentView viewWithTag:991];
-    if (!l) {
-        l = [UILabel new];
-        l.tag = 991;
-        l.translatesAutoresizingMaskIntoConstraints = NO;
-        [v.contentView addSubview:l];
-
-        [NSLayoutConstraint activateConstraints:@[
-            [l.leadingAnchor constraintEqualToAnchor:v.contentView.leadingAnchor constant:22],
-            [l.bottomAnchor constraintEqualToAnchor:v.contentView.bottomAnchor constant:-8],
-
-        ]];
-    }
+    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(22, 12, t.bounds.size.width - 40, 18)];
+    l.backgroundColor = [UIColor clearColor];
     l.attributedText = [CHTheme tracked:txt
         font:[CHTheme mono:11 weight:UIFontWeightSemibold]
         color:(s == 0 ? CH_ACCENT : CH_SUB) spacing:1.2];
+    [v addSubview:l];
     return v;
 }
 - (CGFloat)tableView:(UITableView *)t heightForHeaderInSection:(NSInteger)s { return 34; }
