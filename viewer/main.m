@@ -1,7 +1,8 @@
-// main.m — CryptoViewer 入口 + AppDelegate
+// main.m — 入口 + AppDelegate（启动动画 → 主界面）
 #import <UIKit/UIKit.h>
 #import "CHRootVC.h"
 #import "CHTheme.h"
+#import "CHSplashVC.h"
 
 @interface CHAppDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
@@ -12,22 +13,30 @@
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opts {
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
 
-    CHRootVC *root = [CHRootVC new];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:root];
+    // ── 启动动画 ──
+    CHSplashVC *splash = [CHSplashVC new];
+    splash.onFinish = ^{
+        CHRootVC *root = [CHRootVC new];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:root];
 
-    // 大标题 + 透明导航栏（现代观感）
-    if (@available(iOS 13.0, *)) {
-        UINavigationBarAppearance *ap = [UINavigationBarAppearance new];
-        [ap configureWithTransparentBackground];
-        ap.titleTextAttributes = @{NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};
-        ap.largeTitleTextAttributes = @{NSFontAttributeName: [UIFont systemFontOfSize:34 weight:UIFontWeightBold]};
-        nav.navigationBar.standardAppearance = ap;
-        nav.navigationBar.scrollEdgeAppearance = ap;
-        nav.navigationBar.compactAppearance = ap;
-    }
-    nav.navigationBar.prefersLargeTitles = YES;
+        if (@available(iOS 13.0, *)) {
+            UINavigationBarAppearance *ap = [UINavigationBarAppearance new];
+            [ap configureWithTransparentBackground];
+            ap.titleTextAttributes = @{NSFontAttributeName: [CHTheme mono:15 weight:UIFontWeightBold],
+                                       NSForegroundColorAttributeName: CH_ACCENT};
+            nav.navigationBar.standardAppearance = ap;
+            nav.navigationBar.scrollEdgeAppearance = ap;
+            nav.navigationBar.compactAppearance = ap;
+        }
+        nav.navigationBar.tintColor = CH_ACCENT;
 
-    self.window.rootViewController = nav;
+        [UIView transitionWithView:self.window duration:0.35
+                           options:UIViewAnimationOptionTransitionCrossDissolve
+                        animations:^{ self.window.rootViewController = nav; }
+                        completion:nil];
+    };
+
+    self.window.rootViewController = splash;
     [self.window makeKeyAndVisible];
     return YES;
 }
