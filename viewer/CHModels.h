@@ -21,8 +21,17 @@
 @property (nonatomic, copy)   NSString *type;    // CCCrypt / String / HTTP.request …
 @property (nonatomic, copy)   NSDictionary *raw;
 
+// ── 聚合（去重）──
+@property (nonatomic, assign) NSInteger count;       // 出现次数（默认 1）
+@property (nonatomic, assign) NSTimeInterval firstT; // 首次时间
+@property (nonatomic, assign) NSTimeInterval lastT;  // 最近时间
+@property (nonatomic, strong) NSMutableArray<CHRecord *> *dups;  // 同内容的其它实例
+
+/// 去重键（方案 C：按 type + 关键字段）
+@property (nonatomic, copy, readonly) NSString *dedupKey;
+
 @property (nonatomic, copy, readonly) NSString *title;     // 卡片主标题
 @property (nonatomic, copy, readonly) NSString *subtitle;  // 卡片副标题
 @property (nonatomic, copy, readonly) NSString *detail;    // 展开内容
-@property (nonatomic, copy, readonly) NSString *algoTag;   // 算法标签（AES-256 / RC4 / HMAC-SHA256 …）
+@property (nonatomic, copy, readonly) NSString *algoTag;   // 算法标签
 @end
