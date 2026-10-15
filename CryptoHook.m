@@ -20,6 +20,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <mach/mach_time.h>
 
 // ============================================================
 // 配置（由 CryptoViewer 写入，dylib 启动时读）
@@ -40,15 +41,22 @@ static void cfgRefresh(void) {
         gCfg = @{}; gCfgTime = [NSDate date];
     }
 }
+static BOOL gSlowStack = NO;   // 是否采集完整调用栈（很慢，默认关）
+
 static BOOL cfgOn(NSString *key) {
     cfgRefresh();
+    gSlowStack = [gCfg[@"slowStack"] boolValue];
     NSNumber *v = gCfg[key];
-    return v ? v.boolValue : YES;   // 默认全开
+    if (v) return v.boolValue;
+    // ★ 默认值：L1（系统加密）默认【关】—— 它频率最高，是卡死主因
+    //          L2（明文）/ L3（网络）默认开 —— 信息价值高、频率低
+    if ([key isEqualToString:@"L1"]) return NO;
+    return YES;
 }
 static int cfgRate(void) {
     cfgRefresh();
     NSNumber *v = gCfg[@"rate"];
-    return v ? v.intValue : 200;
+    return v ? v.intValue : 50;   // 默认 50 条/秒（原来 200 太高）
 }
 
 // ============================================================
@@ -107,7 +115,7 @@ static void logJSON(NSDictionary *rec) {
         if (j) {
             fwrite(j.bytes, 1, j.length, gFp);
             fputc('\n', gFp);
-            fflush(gFp);
+            // ★ 不每次 fflush（高频刷盘会卡死）；由定时器每 2 秒刷一次
             gBytes += j.length + 1;
         }
     }
@@ -118,13 +126,15 @@ static void logJSON(NSDictionary *rec) {
 // 噪声抑制：同类记录最多 N 条/秒
 static BOOL rateGate(const char *key, int perSec) {
     static NSMutableDictionary *cnt = nil;
-    static NSTimeInterval last = 0;
+    static uint64_t lastT = 0;
     static pthread_mutex_t l2 = PTHREAD_MUTEX_INITIALIZER;
+    uint64_t now = mach_absolute_time();
+    static double s2t = 0;
+    if (s2t == 0) { mach_timebase_info_data_t tb; mach_timebase_info(&tb); s2t = (double)tb.numer / tb.denom / 1e9; }
     BOOL pass = YES;
     pthread_mutex_lock(&l2);
     if (!cnt) cnt = [NSMutableDictionary new];
-    NSTimeInterval now = [NSDate date].timeIntervalSince1970;
-    if (now - last >= 1.0) { [cnt removeAllObjects]; last = now; }
+    if ((now - lastT) * s2t >= 1.0) { [cnt removeAllObjects]; lastT = now; }
     NSString *k = @(key);
     int c = [[cnt objectForKey:k] intValue];
     if (c >= perSec) pass = NO;
@@ -165,20 +175,22 @@ static NSMutableDictionary *base(NSString *layer, NSString *type) {
         @"layer":layer,
         @"type":type
     } mutableCopy];
-    // ★ 完整调用栈（过滤系统噪音，最多 12 帧）
-    @try {
-        NSArray *bt = fullBacktrace(3);
-        if (bt.count) {
-            d[@"bt"] = bt;
-            d[@"caller"] = bt.firstObject;   // 兼容旧字段
-        }
-    } @catch (__unused NSException *e) {}
+    // ★ 调用栈：默认不采集（backtrace+dladdr 极慢，是卡死主因）
+    //    仅在 cfg 里开了 slowStack 时才做
+    if (gSlowStack) {
+        @try {
+            NSArray *bt = fullBacktrace(3);
+            if (bt.count) { d[@"bt"] = bt; d[@"caller"] = bt.firstObject; }
+        } @catch (__unused NSException *e) {}
+    }
     return d;
 }
 static void emit(NSMutableDictionary *rec) {
     @try {
         logJSON(rec);
-        NSLog(@"[CryptoHook] %@", rec);
+        // ★ 不再 NSLog（写系统日志很慢，改成配置开关）
+        cfgRefresh();
+        if ([gCfg[@"syslog"] boolValue]) NSLog(@"[CryptoHook] %@", rec);
     } @catch (__unused NSException *e) {}
 }
 
@@ -477,6 +489,17 @@ static void ch_init(void) {
         emit(d);
         installL2();
         installL3();
+        // ★ 每 2 秒批量刷盘一次（替代每次 fflush）
+        dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                     dispatch_get_global_queue(0, 0));
+        dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC),
+                                  2*NSEC_PER_SEC, 1*NSEC_PER_SEC);
+        dispatch_source_set_event_handler(t, ^{
+            pthread_mutex_lock(&gLock);
+            if (gFp) fflush(gFp);
+            pthread_mutex_unlock(&gLock);
+        });
+        dispatch_resume(t);
         NSLog(@"[CryptoHook] L1 interpose installed (CCCrypt/CCHmac/CC_SHA256/SecKey*)");
     });
 }
