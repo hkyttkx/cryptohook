@@ -5,6 +5,13 @@
 #import "CHTheme.h"
 #import "CHDetailVC.h"
 
+#pragma mark - 渐变视图（layerClass 方案，避免 mask 白条）
+@interface CHGradientView : UIView
+@end
+@implementation CHGradientView
++ (Class)layerClass { return [CAGradientLayer class]; }
+@end
+
 #pragma mark - Cell
 @interface CHAppCell : UITableViewCell
 @property (nonatomic, strong) UIView      *card;
