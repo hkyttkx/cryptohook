@@ -20,15 +20,21 @@
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:root];
 
         if (@available(iOS 13.0, *)) {
+            // ★ 毛玻璃常驻 —— 内容不再穿到导航栏底下
             UINavigationBarAppearance *ap = [UINavigationBarAppearance new];
-            [ap configureWithTransparentBackground];
+            [ap configureWithDefaultBackground];
+            ap.backgroundColor = [CH_BG colorWithAlphaComponent:0.92];
+            ap.backgroundEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+            ap.shadowColor = CH_LINE;
             ap.titleTextAttributes = @{NSFontAttributeName: [CHTheme mono:15 weight:UIFontWeightBold],
                                        NSForegroundColorAttributeName: CH_ACCENT};
             nav.navigationBar.standardAppearance = ap;
-            nav.navigationBar.scrollEdgeAppearance = ap;
+            nav.navigationBar.scrollEdgeAppearance = ap;    // ← 滚动时同样毛玻璃
             nav.navigationBar.compactAppearance = ap;
+            nav.navigationBar.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         }
         nav.navigationBar.tintColor = CH_ACCENT;
+        nav.navigationBar.prefersLargeTitles = NO;   // ★ 关掉大标题（会撑乱布局）
 
         [UIView transitionWithView:self.window duration:0.35
                            options:UIViewAnimationOptionTransitionCrossDissolve
