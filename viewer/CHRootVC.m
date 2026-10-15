@@ -154,17 +154,17 @@
         l;
     });
 
-    // 顶部渐变光晕（科技感）
-    UIView *halo = [UIView new];
+    // 顶部渐变光晕（用 CAGradientLayer 作 layerClass，避免 mask 白条）
+    CHGradientView *halo = [CHGradientView new];
     halo.translatesAutoresizingMaskIntoConstraints = NO;
     halo.userInteractionEnabled = NO;
-    CAGradientLayer *gl = [CAGradientLayer layer];
-    gl.colors = @[(__bridge id)[CH_ACCENT colorWithAlphaComponent:0.14].CGColor,
+    CAGradientLayer *gl = (CAGradientLayer *)halo.layer;
+    gl.colors = @[(__bridge id)[CH_ACCENT colorWithAlphaComponent:0.13].CGColor,
+                  (__bridge id)[CH_ACCENT colorWithAlphaComponent:0.03].CGColor,
                   (__bridge id)[CH_BG colorWithAlphaComponent:0.0].CGColor];
+    gl.locations = @[@0.0, @0.45, @1.0];
     gl.startPoint = CGPointMake(0.5, 0);
     gl.endPoint   = CGPointMake(0.5, 1);
-    halo.layer.mask = gl;
-    gl.frame = CGRectMake(0, 0, 400, 220);
     [self.view addSubview:halo];
     [NSLayoutConstraint activateConstraints:@[
         [halo.topAnchor constraintEqualToAnchor:self.view.topAnchor],
