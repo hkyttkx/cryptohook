@@ -1,0 +1,42 @@
+name: Build CryptoHook
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show SDK
+        run: |
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build dylib
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          mkdir -p dist
+          xcrun --sdk iphoneos clang \
+            -arch arm64 -arch arm64e \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=14.0 \
+            -dynamiclib -fobjc-arc -O2 \
+            -o dist/CryptoHook.dylib \
+            src/CryptoHook.m \
+            -framework Foundation -framework UIKit -framework Security \
+            -install_name @executable_path/Frameworks/CryptoHook.dylib
+          ls -la dist/
+          file dist/CryptoHook.dylib
+
+      - name: Commit back
+        run: |
+          git config user.name "gh-actions"
+          git config user.email "actions@github.com"
+          git add -f dist/CryptoHook.dylib
+          git commit -m "build: CryptoHook.dylib [skip ci]" || echo "no change"
+          git push
