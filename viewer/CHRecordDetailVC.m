@@ -507,8 +507,7 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         [cfg writeToFile:[d stringByAppendingPathComponent:@"config.plist"] atomically:YES];
     }
     UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"已过滤"
-        message:[NSString stringWithFormat:@"%@ 已加入黑名单，之后不再记录。\n
-可在「设置 → 过滤规则」里移除。", v]
+        message:[NSString stringWithFormat:@"%@ 已加入黑名单，之后不再记录。\n可在「设置 → 过滤规则」里移除。", v]
         preferredStyle:UIAlertControllerStyleAlert];
     [ok addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:ok animated:YES completion:nil];
