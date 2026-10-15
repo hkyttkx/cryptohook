@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <mach/mach_time.h>
+#include <mach/vm_region.h>
 
 // ============================================================
 // 配置（由 CryptoViewer 写入；dylib 优先读【自己沙盒】，其次共享目录）
@@ -738,6 +739,140 @@ static void installL3(void) {
 }
 
 // ============================================================
+// L4：密钥暴力搜索（扫描本进程内存，找能解开指定密文的 AES key）
+//   Viewer 写 scan_request.plist -> dylib 扫描 -> 写 scan_result.plist
+// ============================================================
+#define SCAN_REQ  @"/var/mobile/Library/CryptoHook/scan_request.plist"
+#define SCAN_RES  @"/var/mobile/Library/CryptoHook/scan_result.plist"
+
+static NSData *hexToDataLocal(NSString *hex) {
+    if (![hex isKindOfClass:[NSString class]] || hex.length < 2) return nil;
+    NSMutableData *d = [NSMutableData data];
+    for (NSUInteger i = 0; i + 1 < hex.length; i += 2) {
+        unsigned int v = 0;
+        if (![[NSScanner scannerWithString:[hex substringWithRange:NSMakeRange(i, 2)]]
+              scanHexInt:&v]) break;
+        uint8_t b = (uint8_t)v;
+        [d appendBytes:&b length:1];
+    }
+    return d.length ? d : nil;
+}
+
+// 判断解出来的东西"像不像明文"
+static BOOL looksLikePlaintext(NSData *d) {
+    if (d.length < 4) return NO;
+    const uint8_t *b = d.bytes;
+    NSUInteger printable = 0, limit = MIN(d.length, 128);
+    for (NSUInteger i = 0; i < limit; i++) {
+        uint8_t c = b[i];
+        if ((c >= 32 && c < 127) || c == '\n' || c == '\r' || c == '\t') printable++;
+    }
+    if (printable * 100 / limit >= 85) return YES;      // 85% 可打印 = 明文
+    // 或者开头是 JSON
+    if (b[0] == '{' || b[0] == '[') return YES;
+    return NO;
+}
+
+static void doScanKey(NSDictionary *req) {
+    NSString *ctHex = req[@"cipherHex"];
+    NSArray *tryAlgs = req[@"algs"] ?: @[@(kCCAlgorithmAES)];
+    NSMutableArray *found = [NSMutableArray array];
+    unsigned long scannedMB = 0;
+    BOOL stop = NO;
+
+    NSData *ctFull = hexToDataLocal(ctHex);
+    if (!ctFull.length) return;
+
+    // 密文可能是 IV(16)+CT 或纯 CT —— 两种都试
+    NSMutableArray *ctCands = [NSMutableArray array];
+    [ctCands addObject:ctFull];
+    if (ctFull.length > 16)
+        [ctCands addObject:[ctFull subdataWithRange:NSMakeRange(16, ctFull.length - 16)]];
+
+    // 遍历可读内存区域
+    mach_port_t task = mach_task_self();
+    vm_address_t a = 0;
+    vm_size_t s = 0;
+    natural_t depth = 0;
+
+    while (!stop) {
+        struct vm_region_submap_info_64 sub;
+        mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+        kern_return_t kr = vm_region_recurse_64(task, &a, &s, &depth,
+                                                (vm_region_info_t)&sub, &cnt);
+        if (kr != KERN_SUCCESS) break;
+        if ((sub.protection & VM_PROT_READ) && s > 4096 && s < (256UL * 1024 * 1024)) {
+            scannedMB += s / (1024 * 1024);
+            const uint8_t *p = (const uint8_t *)a;
+            for (vm_size_t off = 0; off + 32 <= s && !stop; off += 4) {
+                for (NSNumber *algN in tryAlgs) {
+                    CCAlgorithm alg = (CCAlgorithm)algN.intValue;
+                    for (int klen = 16; klen <= 32 && !stop; klen += 16) {
+                        const uint8_t *keyp = p + off;
+                        for (NSData *ct in ctCands) {
+                            if (ct.length < 32) continue;
+                            uint8_t iv[16];
+                            memcpy(iv, ct.bytes, 16);
+                            const uint8_t *cdata = ct.bytes + 16;
+                            size_t clen = ct.length - 16;
+                            if (clen % 16) continue;
+                            size_t outCap = clen + 32;
+                            uint8_t *out = malloc(outCap);
+                            if (!out) continue;
+                            size_t moved = 0;
+                            CCCryptorStatus st = CCCrypt(kCCDecrypt, alg,
+                                kCCOptionPKCS7Padding, keyp, klen, iv,
+                                cdata, clen, out, outCap, &moved);
+                            if (st == kCCSuccess && moved > 0) {
+                                NSData *plain = [NSData dataWithBytes:out length:moved];
+                                if (looksLikePlaintext(plain)) {
+                                    NSString *kh = hexStr(keyp, klen, 64);
+                                    [found addObject:@{
+                                        @"key": (kh.length >= (NSUInteger)(klen*2))
+                                               ? [kh substringToIndex:klen*2] : kh,
+                                        @"keyLen": @(klen),
+                                        @"alg": @(alg),
+                                        @"plainHex": hexStr(plain.bytes, plain.length, 256),
+                                        @"plainText": tryUTF8(plain.bytes, plain.length) ?: @"",
+                                        @"addr": [NSString stringWithFormat:@"0x%llx",
+                                                  (unsigned long long)a + off]
+                                    }];
+                                    if (found.count >= 8) stop = YES;
+                                }
+                            }
+                            free(out);
+                            if (stop) break;
+                        }
+                    }
+                }
+            }
+        }
+        a += s;
+    }
+
+    NSMutableDictionary *res = [NSMutableDictionary dictionary];
+    res[@"t"] = @([NSDate date].timeIntervalSince1970);
+    res[@"scannedMB"] = @(scannedMB);
+    res[@"results"] = found;
+    res[@"done"] = @YES;
+    [res writeToFile:SCAN_RES atomically:YES];
+    NSLog(@"[CryptoHook] 扫描完成 %luMB，命中 %lu", scannedMB, (unsigned long)found.count);
+}
+
+// 轮询 scan_request.plist
+static void checkScanRequest(void) {
+    NSDictionary *req = [NSDictionary dictionaryWithContentsOfFile:SCAN_REQ];
+    if (!req || ![req[@"cipherHex"] isKindOfClass:[NSString class]]) return;
+    // 已处理过（用 nonce 去重）
+    NSString *nonce = req[@"nonce"];
+    static NSString *lastNonce = nil;
+    if (nonce && [nonce isEqualToString:lastNonce]) return;
+    lastNonce = nonce;
+    NSLog(@"[CryptoHook] 收到扫描请求");
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{ doScanKey(req); });
+}
+
+// ============================================================
 // 初始化
 // ============================================================
 __attribute__((constructor))
@@ -751,6 +886,13 @@ static void ch_init(void) {
         emit(d);
         installL2();
         installL3();
+        // ★ 每 2 秒检查一次扫描请求
+        dispatch_source_t st = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                     dispatch_get_global_queue(0, 0));
+        dispatch_source_set_timer(st, dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC),
+                                  2*NSEC_PER_SEC, 1*NSEC_PER_SEC);
+        dispatch_source_set_event_handler(st, ^{ checkScanRequest(); });
+        dispatch_resume(st);
         // ★ 每 2 秒批量刷盘一次（替代每次 fflush）
         dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                      dispatch_get_global_queue(0, 0));
