@@ -52,6 +52,9 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 @property (nonatomic, strong) UILabel     *subL;
 @property (nonatomic, strong) UIView      *dataBox;
 @property (nonatomic, strong) UILabel     *dataL;
+@property (nonatomic, strong) UILabel     *dupL;      // 子项序号/时间
+@property (nonatomic, assign) CGFloat      leadingShift;  // 子项缩进
+@property (nonatomic, assign) BOOL         alphaDim;      // 子项变暗
 - (void)configWith:(CHRecord *)r keyword:(NSString *)kw;
 @end
 
@@ -109,6 +112,11 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
         _countL.hidden = YES;
         _countL.translatesAutoresizingMaskIntoConstraints = NO;
         [_card addSubview:_countL];
+
+        _dupL = [UILabel new];
+        _dupL.hidden = YES;
+        _dupL.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_dupL];
 
         _subL = [UILabel new];
         _subL.numberOfLines = 2;
@@ -240,6 +248,23 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     self.timeL.attributedText = [CHTheme tracked:[df stringFromDate:r.date]
         font:[CHTheme mono:9.5 weight:UIFontWeightRegular] color:CH_SUB spacing:0.1];
 
+    // ★ 展开出来的子项：缩进 + 显示时间 + 变暗
+    if (self.leadingShift > 0 || self.alphaDim) {
+        self.dupL.hidden = NO;
+        NSDateFormatter *tf = [NSDateFormatter new];
+        tf.dateFormat = @"HH:mm:ss.SSS";
+        self.dupL.attributedText = [CHTheme tracked:[NSString stringWithFormat:@"└ %@", [tf stringFromDate:r.date]]
+            font:[CHTheme mono:9.5 weight:UIFontWeightRegular] color:CH_SUB spacing:0.2];
+        self.alphaDim ? (self.card.alpha = 0.72) : (self.card.alpha = 1.0);
+        // 数据区在小项里不显示（省空间）
+        self.dataBox.hidden = YES;
+        self.subL.hidden = YES;
+        return;
+    }
+    self.dupL.hidden = YES;
+    self.card.alpha = 1.0;
+    self.subL.hidden = NO;
+
     NSString *data = r.detail;
     self.dataBox.hidden = (data.length == 0);
     self.dataL.attributedText = chHighlight(data ?: @"", kw,
@@ -264,6 +289,10 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 @property (nonatomic, assign) BOOL groupBySession;  // 会话配对
 @property (nonatomic, strong) UIBarButtonItem *timeBtn;
 @property (nonatomic, assign) BOOL searchBarActive;
+@property (nonatomic, strong) NSMutableSet<NSString *> *expandedKeys;  // 哪些聚合项展开了
+@property (nonatomic, strong) NSMutableArray<CHRecord *> *rows;        // 实际显示的行（含展开的子项）
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *rowIsDup;    // 并行：该行是否子项
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *rowDupIdx;   // 并行：子项序号
 @end
 
 @implementation CHDetailVC
@@ -274,6 +303,10 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     if (@available(iOS 13.0, *)) self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.filter = nil;
     self.keyword = nil;
+    self.expandedKeys = [NSMutableSet set];
+    self.rows = [NSMutableArray array];
+    self.rowIsDup = [NSMutableArray array];
+    self.rowDupIdx = [NSMutableArray array];
 
     self.navigationItem.titleView = ({
         UILabel *l = [UILabel new];
@@ -527,8 +560,38 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     }
 
     self.records = out;
+    [self rebuildRows];
     self.empty.hidden = (out.count > 0);
     [self.table reloadData];
+}
+
+/// 依据展开状态，把 records 摊平成 rows（展开的项插入其子项）
+- (void)rebuildRows {
+    [self.rows removeAllObjects];
+    [self.rowIsDup removeAllObjects];
+    [self.rowDupIdx removeAllObjects];
+    for (CHRecord *r in self.records) {
+        [self.rows addObject:r];
+        [self.rowIsDup addObject:@NO];
+        [self.rowDupIdx addObject:@(-1)];
+        if (r.count > 1 && [self.expandedKeys containsObject:r.dedupKey]) {
+            NSInteger i = 0;
+            for (CHRecord *d in r.dups) {
+                [self.rows addObject:d];
+                [self.rowIsDup addObject:@YES];
+                [self.rowDupIdx addObject:@(i++)];
+            }
+        }
+    }
+}
+
+- (CHRecord *)rowRecord:(NSIndexPath *)ip {
+    if (ip.row < (NSInteger)self.rows.count) return self.rows[ip.row];
+    return nil;
+}
+- (BOOL)rowIsDupAt:(NSIndexPath *)ip {
+    if (ip.row < (NSInteger)self.rowIsDup.count) return [self.rowIsDup[ip.row] boolValue];
+    return NO;
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -753,19 +816,41 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 }
 
 #pragma mark - Table
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return self.records.count; }
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return self.rows.count; }
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
     static NSString *cid = @"rec";
     CHRecCell *c = [t dequeueReusableCellWithIdentifier:cid];
     if (!c) c = [[CHRecCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cid];
-    [c configWith:self.records[ip.row] keyword:self.keyword];
+    CHRecord *rec = [self rowRecord:ip];
+    BOOL dup = [self rowIsDupAt:ip];
+    [c configWith:rec keyword:self.keyword];
+    // 子项：缩进 + 变暗
+    if (dup) {
+        c.leadingShift = 1;
+        c.alphaDim = YES;
+    } else {
+        c.leadingShift = 0;
+        c.alphaDim = NO;
+    }
     return c;
 }
 
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [t deselectRowAtIndexPath:ip animated:YES];
-    CHRecord *r = self.records[ip.row];
+    CHRecord *r = [self rowRecord:ip];
+    if (!r) return;
+
+    // 折叠态点聚合项 -> 就地展开；展开态再点 -> 收起
+    if (![self rowIsDupAt:ip] && r.count > 1) {
+        NSString *k = r.dedupKey;
+        if ([self.expandedKeys containsObject:k]) [self.expandedKeys removeObject:k];
+        else [self.expandedKeys addObject:k];
+        [self rebuildRows];
+        [t reloadData];
+        return;
+    }
+    // 子项 / 单条 -> 进详情
     CHRecordDetailVC *d = [CHRecordDetailVC new];
     d.record = r;
     [self.navigationController pushViewController:d animated:YES];
@@ -778,16 +863,14 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     commitEditingStyle:(UITableViewCellEditingStyle)style
      forRowAtIndexPath:(NSIndexPath *)ip {
     if (style != UITableViewCellEditingStyleDelete) return;
-    CHRecord *r = self.records[ip.row];
+    CHRecord *r = [self rowRecord:ip];
+    if (!r) return;
     NSInteger n = [CHScanner deleteRecords:@[r]];
     // 本地同步移除
-    NSMutableArray *arr = [self.records mutableCopy];
-    [arr removeObjectAtIndex:ip.row];
-    self.records = arr;
     NSMutableArray *all = [self.allRecords mutableCopy];
     [all removeObject:r];
     self.allRecords = all;
-    [t deleteRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationFade];
+    [self applyFilter];
     NSLog(@"[CryptoViewer] 删除记录 %ld 条(含聚合)", (long)n);
 }
 
