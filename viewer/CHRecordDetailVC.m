@@ -51,6 +51,7 @@ static NSString *textToHex(NSString *s) {
 @property (nonatomic, copy) NSString *fieldValue;
 @property (nonatomic, strong) UILabel *nameL;
 @property (nonatomic, strong) UILabel *valueL;
+@property (nonatomic, strong) UITextView *valueTV;   // 长文本用（可滚动）
 @property (nonatomic, strong) UIButton *dupBtn;
 - (instancetype)initWithName:(NSString *)n value:(NSString *)v color:(UIColor *)color;
 @end
@@ -83,19 +84,37 @@ static NSString *textToHex(NSString *s) {
         [_dupBtn addTarget:self action:@selector(copyField) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:_dupBtn];
 
-        _valueL = [UILabel new];
-        _valueL.numberOfLines = 0;
-        _valueL.lineBreakMode = NSLineBreakByCharWrapping;
-        _valueL.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:_valueL];
+        BOOL isLong = (v.length > 400);   // 长文本 -> 可滚动，避免撑爆布局
 
         NSMutableParagraphStyle *ps = [NSMutableParagraphStyle new];
-        ps.lineSpacing = 4;
+        ps.lineSpacing = 3;
         ps.lineBreakMode = NSLineBreakByCharWrapping;
-        _valueL.attributedText = [[NSAttributedString alloc] initWithString:v ?: @""
-            attributes:@{NSFontAttributeName:[CHTheme mono:11.5 weight:UIFontWeightRegular],
-                         NSForegroundColorAttributeName:CH_TEXT,
-                         NSParagraphStyleAttributeName:ps}];
+
+        if (!isLong) {
+            _valueL = [UILabel new];
+            _valueL.numberOfLines = 0;
+            _valueL.lineBreakMode = NSLineBreakByCharWrapping;
+            _valueL.translatesAutoresizingMaskIntoConstraints = NO;
+            [self addSubview:_valueL];
+            _valueL.attributedText = [[NSAttributedString alloc] initWithString:v ?: @""
+                attributes:@{NSFontAttributeName:[CHTheme mono:10 weight:UIFontWeightRegular],
+                             NSForegroundColorAttributeName:CH_TEXT,
+                             NSParagraphStyleAttributeName:ps}];
+        } else {
+            _valueTV = [UITextView new];
+            _valueTV.editable = NO;
+            _valueTV.scrollEnabled = YES;
+            _valueTV.backgroundColor = [UIColor clearColor];
+            _valueTV.textContainerInset = UIEdgeInsetsZero;
+            _valueTV.textContainer.lineFragmentPadding = 0;
+            _valueTV.translatesAutoresizingMaskIntoConstraints = NO;
+            [self addSubview:_valueTV];
+            _valueTV.attributedText = [[NSAttributedString alloc] initWithString:v ?: @""
+                attributes:@{NSFontAttributeName:[CHTheme mono:10 weight:UIFontWeightRegular],
+                             NSForegroundColorAttributeName:CH_TEXT,
+                             NSParagraphStyleAttributeName:ps}];
+            [_valueTV.heightAnchor constraintEqualToConstant:150].active = YES;
+        }
 
         [NSLayoutConstraint activateConstraints:@[
             [_nameL.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:12],
@@ -105,13 +124,16 @@ static NSString *textToHex(NSString *s) {
             [_dupBtn.centerYAnchor constraintEqualToAnchor:_nameL.centerYAnchor],
             [_dupBtn.widthAnchor constraintEqualToConstant:26],
             [_dupBtn.heightAnchor constraintEqualToConstant:26],
-            [_valueL.leadingAnchor  constraintEqualToAnchor:self.leadingAnchor constant:12],
-            [_valueL.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
-            [_valueL.topAnchor      constraintEqualToAnchor:_nameL.bottomAnchor constant:8],
-            [_valueL.bottomAnchor   constraintEqualToAnchor:self.bottomAnchor constant:-12],
         ]];
-        [_valueL setContentCompressionResistancePriority:UILayoutPriorityRequired
-                                                forAxis:UILayoutConstraintAxisVertical];
+        UIView *body = _valueTV ?: _valueL;
+        [NSLayoutConstraint activateConstraints:@[
+            [body.leadingAnchor  constraintEqualToAnchor:self.leadingAnchor constant:12],
+            [body.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
+            [body.topAnchor      constraintEqualToAnchor:_nameL.bottomAnchor constant:7],
+            [body.bottomAnchor   constraintEqualToAnchor:self.bottomAnchor constant:-11],
+        ]];
+        if (_valueL) [_valueL setContentCompressionResistancePriority:UILayoutPriorityRequired
+                                                             forAxis:UILayoutConstraintAxisVertical];
     }
     return self;
 }
@@ -255,12 +277,16 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     df.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
     addField(@"时间", [df stringFromDate:self.record.date], CH_SUB);
 
-    // ── ② 密钥材料 ──
-    BOOL hasKeyMat = (r[@"key"] || r[@"iv"]);
-    if (hasKeyMat) {
-        addRaw(makeSectionHeader(@"密钥材料", CH_ACCENT));
+    // ── ② 密钥 KEY（独立分组）──
+    if (r[@"key"] && [r[@"key"] length] > 0) {
+        addRaw(makeSectionHeader(@"密钥 KEY", CH_ACCENT));
         addData(@"KEY", r[@"key"], CH_ACCENT);
-        addData(@"IV",  r[@"iv"],  CH_BLUE);
+    }
+
+    // ── ③ 初始向量 IV（独立分组）──
+    if (r[@"iv"] && [r[@"iv"] length] > 0) {
+        addRaw(makeSectionHeader(@"初始向量 IV", CH_BLUE));
+        addData(@"IV", r[@"iv"], CH_BLUE);
     }
 
     // ── ③ 原始数据（输入）──
