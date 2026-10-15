@@ -83,7 +83,7 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
     @try {
         NSInteger r = sw.tag;
         if (r < 0 || r > 3) return;
-        self.cfg[@(kKeys[r])] = @(sw.on);
+        self.cfg[kKeys[r]] = @(sw.on);
         [self saveCfg];
     } @catch (NSException *e) {
         NSLog(@"[CryptoHook] switchChanged 异常: %@", e);
@@ -119,12 +119,12 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
     c.selectionStyle = UITableViewCellSelectionStyleDefault;
 
     if (ip.section == 0) {
-        c.textLabel.text = @(kTitles[ip.row]);
-        c.detailTextLabel.text = @(kDescs[ip.row]);
+        c.textLabel.text = kTitles[ip.row];
+        c.detailTextLabel.text = kDescs[ip.row];
         UISwitch *sw = [UISwitch new];
         sw.onTintColor = CH_ACCENT;
         sw.tag = ip.row;
-        NSNumber *v = self.cfg[@(kKeys[ip.row])];
+        NSNumber *v = self.cfg[kKeys[ip.row]];
         sw.on = v ? v.boolValue : YES;
         [sw removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
         [sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
