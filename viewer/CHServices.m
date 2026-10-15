@@ -7,6 +7,11 @@
 + (UIImage *)_applicationIconImageForBundleIdentifier:(NSString *)bid format:(int)fmt scale:(CGFloat)scale;
 @end
 
+@interface CHScanner ()
+/// 未聚合的原始记录
++ (NSArray<CHRecord *> *)rawRecordsForApp:(CHApp *)app limit:(NSInteger)limit;
+@end
+
 @implementation CHScanner
 
 #pragma mark - 图标
@@ -127,6 +132,42 @@
 }
 
 + (NSArray<CHRecord *> *)recordsForApp:(CHApp *)app limit:(NSInteger)limit {
+    return [self recordsForApp:app limit:limit aggregate:NO];
+}
+
++ (NSArray<CHRecord *> *)recordsForApp:(CHApp *)app limit:(NSInteger)limit aggregate:(BOOL)agg {
+    NSArray *raw = [self rawRecordsForApp:app limit:limit];
+    if (!agg) return raw;
+
+    // ★ 去重聚合
+    NSMutableDictionary *map = [NSMutableDictionary dictionary];
+    NSMutableArray *order = [NSMutableArray array];
+    for (CHRecord *r in raw) {
+        NSString *k = r.dedupKey;
+        CHRecord *ex = map[k];
+        if (!ex) {
+            r.count = 1;
+            r.firstT = r.t;
+            r.lastT  = r.t;
+            r.dups   = [NSMutableArray array];
+            map[k] = r;
+            [order addObject:r];
+        } else {
+            ex.count += 1;
+            if (r.t < ex.firstT) ex.firstT = r.t;
+            if (r.t > ex.lastT) { ex.lastT = r.t; ex.t = r.t; ex.date = r.date; }
+            if (ex.dups.count < 200) [ex.dups addObject:r];
+        }
+    }
+    // 按最近活动倒序
+    [order sortUsingComparator:^NSComparisonResult(CHRecord *a, CHRecord *b) {
+        return a.lastT > b.lastT ? NSOrderedAscending
+             : (a.lastT < b.lastT ? NSOrderedDescending : NSOrderedSame);
+    }];
+    return order;
+}
+
++ (NSArray<CHRecord *> *)rawRecordsForApp:(CHApp *)app limit:(NSInteger)limit {
     NSMutableArray *out = [NSMutableArray array];
     for (NSString *p in app.logFiles) {
         NSData *d = [NSData dataWithContentsOfFile:p];
