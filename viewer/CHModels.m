@@ -108,10 +108,42 @@
 - (NSString *)algoTag {
     NSNumber *a = self.raw[@"alg"];
     NSInteger i = a ? a.integerValue : -1;
+    NSDictionary *r = self.raw;
 
-    if ([self.type isEqualToString:@"CCCrypt"] || [self.type isEqualToString:@"CCCryptorCreate"]) {
+    if ([self.type isEqualToString:@"CCCrypt"] ||
+        [self.type isEqualToString:@"CCCryptorCreate"] ||
+        [self.type hasPrefix:@"CCCryptor"]) {
         NSArray *n = @[@"AES", @"DES", @"3DES", @"CAST", @"RC4", @"RC2", @"Blowfish"];
-        return (i >= 0 && i < (NSInteger)n.count) ? n[i] : nil;
+        NSString *alg = (i >= 0 && i < (NSInteger)n.count) ? n[i] : [NSString stringWithFormat:@"alg%ld", (long)i];
+        // key 位数（从 key hex 长度推算）
+        NSString *keyHex = r[@"key"];
+        NSInteger bits = 0;
+        if ([keyHex isKindOfClass:[NSString class]]) {
+            NSInteger bytes = 0;
+            for (NSUInteger k = 0; k < keyHex.length && k < 128; k++) {
+                unichar c = [keyHex characterAtIndex:k];
+                if ((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')) bytes++;
+                else break;
+            }
+            bits = (bytes / 2) * 8;
+        }
+        // 模式 + 填充（来自 opts）
+        NSNumber *optN = r[@"opt"];
+        NSString *mode = nil, *pad = nil;
+        if (optN) {
+            NSInteger opt = optN.integerValue;
+            mode = (opt & kCCOptionECBMode) ? @"ECB" : @"CBC";
+            pad  = (opt & kCCOptionPKCS7Padding) ? @"PKCS7" : @"无填充";
+        }
+        // 流密码（RC4）不显示模式/填充
+        if (i == kCCAlgorithmRC4) {
+            return bits ? [NSString stringWithFormat:@"RC4-%ld", (long)bits] : @"RC4";
+        }
+        NSMutableArray *parts = [NSMutableArray arrayWithObject:alg];
+        if (bits) [parts addObject:[NSString stringWithFormat:@"%ld", (long)bits]];
+        if (mode) [parts addObject:mode];
+        if (pad)  [parts addObject:pad];
+        return [parts componentsJoinedByString:@"-"];
     }
     if ([self.type isEqualToString:@"CCHmac"]) {
         NSArray *n = @[@"HMAC-SHA1", @"HMAC-MD5", @"HMAC-SHA256",
@@ -120,7 +152,7 @@
     }
     if ([self.type isEqualToString:@"CC_SHA256"]) return @"SHA256";
     if ([self.type rangeOfString:@"SecKey"].location != NSNotFound) {
-        NSString *alg = self.raw[@"alg"];
+        NSString *alg = r[@"alg"];
         if ([alg containsString:@"RSA"])  return @"RSA";
         if ([alg containsString:@"EC"])   return @"ECDSA";
         if ([alg containsString:@"AES"])  return @"AES-GCM";
