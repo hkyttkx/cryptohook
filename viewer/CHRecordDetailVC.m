@@ -527,8 +527,17 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     }
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *dir = @"/var/mobile/Library/CryptoHook";
-    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    // ★ 目标 App 的沙盒（dylib 真正能读到的地方）
+    NSMutableArray *dirs = [NSMutableArray array];
+    if (self.app.dataPath.length) {
+        [dirs addObject:[self.app.dataPath stringByAppendingPathComponent:@"Documents/CryptoHook"]];
+        [dirs addObject:[self.app.dataPath stringByAppendingPathComponent:@"Library/Caches/CryptoHook"]];
+    }
+    [dirs addObject:@"/var/mobile/Library/CryptoHook"];   // 共享目录（有权限的 App 也能读）
+
+    for (NSString *d in dirs)
+        [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
 
     NSString *nonce = [NSString stringWithFormat:@"%.0f", [NSDate date].timeIntervalSince1970 * 1000];
     NSDictionary *req = @{
@@ -538,10 +547,10 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         @"t": @([NSDate date].timeIntervalSince1970),
         @"algs": @[@(0), @(5)]            // 0=AES, 5=RC4 都试
     };
-    NSString *reqPath = [dir stringByAppendingPathComponent:@"scan_request.plist"];
-    NSString *resPath = [dir stringByAppendingPathComponent:@"scan_result.plist"];
-    [fm removeItemAtPath:resPath error:nil];
-    [req writeToFile:reqPath atomically:YES];
+    for (NSString *d in dirs) {
+        [fm removeItemAtPath:[d stringByAppendingPathComponent:@"scan_result.plist"] error:nil];
+        [req writeToFile:[d stringByAppendingPathComponent:@"scan_request.plist"] atomically:YES];
+    }
 
     // 转圈提示
     UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"扫描中…"
@@ -554,7 +563,12 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     __block void (^poll)(void);
     poll = ^{
         tries++;
-        NSDictionary *res = [NSDictionary dictionaryWithContentsOfFile:resPath];
+        NSDictionary *res = nil;
+        for (NSString *d in dirs) {
+            NSDictionary *r2 = [NSDictionary dictionaryWithContentsOfFile:
+                                [d stringByAppendingPathComponent:@"scan_result.plist"]];
+            if (r2 && [r2[@"done"] boolValue]) { res = r2; break; }
+        }
         if (res && [res[@"done"] boolValue]) {
             [wait dismissViewControllerAnimated:YES completion:^{
                 [self showScanResult:res];
