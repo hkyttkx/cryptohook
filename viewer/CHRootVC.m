@@ -269,21 +269,27 @@
 // ★ 用标准 HeaderFooterView —— Plain 样式下会正确吸顶
 - (UIView *)tableView:(UITableView *)t viewForHeaderInSection:(NSInteger)s {
     NSString *txt = (s == 0)
-        ? (self.hooked.count ? [NSString stringWithFormat:@"● 已拦截 · %lu", (unsigned long)self.hooked.count] : nil)
-        : (self.others.count ? [NSString stringWithFormat:@"○ 其他应用 · %lu", (unsigned long)self.others.count] : nil);
+        ? (self.hooked.count ? [NSString stringWithFormat:@"已拦截 · %lu", (unsigned long)self.hooked.count] : nil)
+        : (self.others.count ? [NSString stringWithFormat:@"其他应用 · %lu", (unsigned long)self.others.count] : nil);
     if (!txt) return nil;
 
     static NSString *hid = @"hdr";
     UITableViewHeaderFooterView *v = [t dequeueReusableHeaderFooterViewWithIdentifier:hid];
     if (!v) {
         v = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:hid];
-        // ★ 不透明背景（滚动时下面的内容不会透上来）
-        UIView *bg = [UIView new];
-        bg.backgroundColor = CH_BG;
-        v.backgroundView = bg;
         v.contentView.backgroundColor = [UIColor clearColor];
+        // ★ 毛玻璃背景：滚动时下面的内容模糊透出，既不串字也不是硬切
+        UIBlurEffect *be = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+        UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:be];
+        blur.translatesAutoresizingMaskIntoConstraints = NO;
+        v.backgroundView = blur;
+        [NSLayoutConstraint activateConstraints:@[
+            [blur.topAnchor constraintEqualToAnchor:v.topAnchor],
+            [blur.bottomAnchor constraintEqualToAnchor:v.bottomAnchor],
+            [blur.leadingAnchor constraintEqualToAnchor:v.leadingAnchor],
+            [blur.trailingAnchor constraintEqualToAnchor:v.trailingAnchor],
+        ]];
     }
-    v.backgroundView.backgroundColor = CH_BG;
 
     UILabel *l = [v.contentView viewWithTag:991];
     if (!l) {
