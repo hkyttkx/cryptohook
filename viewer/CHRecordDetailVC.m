@@ -7,7 +7,7 @@
 @property (nonatomic, copy) NSString *fieldValue;
 @property (nonatomic, strong) UILabel *nameL;
 @property (nonatomic, strong) UITextView *valueTV;
-@property (nonatomic, strong) UIButton *copyBtn;
+@property (nonatomic, strong) UIButton *dupBtn;
 - (instancetype)initWithName:(NSString *)n value:(NSString *)v;
 - (CGFloat)heightForWidth:(CGFloat)w;
 @end
@@ -31,12 +31,12 @@
         _nameL.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_nameL];
 
-        _copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_copyBtn setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
-        _copyBtn.tintColor = CH_SUB;
-        _copyBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [_copyBtn addTarget:self action:@selector(copyField) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:_copyBtn];
+        _dupBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        [_dupBtn setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
+        _dupBtn.tintColor = CH_SUB;
+        _dupBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        [_dupBtn addTarget:self action:@selector(copyField) forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:_dupBtn];
 
         _valueTV = [UITextView new];
         _valueTV.editable = NO;
@@ -62,10 +62,10 @@
             [_nameL.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:12],
             [_nameL.topAnchor constraintEqualToAnchor:self.topAnchor constant:10],
 
-            [_copyBtn.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-10],
-            [_copyBtn.centerYAnchor constraintEqualToAnchor:_nameL.centerYAnchor],
-            [_copyBtn.widthAnchor constraintEqualToConstant:26],
-            [_copyBtn.heightAnchor constraintEqualToConstant:26],
+            [_dupBtn.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-10],
+            [_dupBtn.centerYAnchor constraintEqualToAnchor:_nameL.centerYAnchor],
+            [_dupBtn.widthAnchor constraintEqualToConstant:26],
+            [_dupBtn.heightAnchor constraintEqualToConstant:26],
 
             [_valueTV.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:12],
             [_valueTV.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
@@ -80,12 +80,12 @@
     [[UIPasteboard generalPasteboard] setString:self.fieldValue ?: @""];
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [fb impactOccurred];
-    [self.copyBtn setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
-    self.copyBtn.tintColor = CH_ACCENT;
+    [self.dupBtn setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
+    self.dupBtn.tintColor = CH_ACCENT;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2*NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        [self.copyBtn setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
-        self.copyBtn.tintColor = CH_SUB;
+        [self.dupBtn setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
+        self.dupBtn.tintColor = CH_SUB;
     });
 }
 
