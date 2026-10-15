@@ -263,18 +263,33 @@
 #pragma mark - Table
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 2; }
 
+// ★ 用标准 HeaderFooterView —— Plain 样式下会正确吸顶
 - (UIView *)tableView:(UITableView *)t viewForHeaderInSection:(NSInteger)s {
     NSString *txt = (s == 0)
         ? (self.hooked.count ? [NSString stringWithFormat:@"● 已拦截 · %lu", (unsigned long)self.hooked.count] : nil)
         : (self.others.count ? [NSString stringWithFormat:@"○ 其他应用 · %lu", (unsigned long)self.others.count] : nil);
     if (!txt) return nil;
-    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0, 0, t.bounds.size.width, 34)];
-    v.backgroundColor = [UIColor clearColor];
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(22, 12, t.bounds.size.width - 40, 20)];
+
+    static NSString *hid = @"hdr";
+    UITableViewHeaderFooterView *v = [t dequeueReusableHeaderFooterViewWithIdentifier:hid];
+    if (!v) v = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:hid];
+    v.contentView.backgroundColor = CH_BG;   // 不透明，滚动时内容不会透上来
+    v.backgroundView = nil;
+
+    UILabel *l = [v.contentView viewWithTag:991];
+    if (!l) {
+        l = [UILabel new];
+        l.tag = 991;
+        l.translatesAutoresizingMaskIntoConstraints = NO;
+        [v.contentView addSubview:l];
+        [NSLayoutConstraint activateConstraints:@[
+            [l.leadingAnchor constraintEqualToAnchor:v.contentView.leadingAnchor constant:22],
+            [l.bottomAnchor constraintEqualToAnchor:v.contentView.bottomAnchor constant:-6],
+        ]];
+    }
     l.attributedText = [CHTheme tracked:txt
         font:[CHTheme mono:11 weight:UIFontWeightSemibold]
         color:(s == 0 ? CH_ACCENT : CH_SUB) spacing:1.2];
-    [v addSubview:l];
     return v;
 }
 - (CGFloat)tableView:(UITableView *)t heightForHeaderInSection:(NSInteger)s { return 34; }
