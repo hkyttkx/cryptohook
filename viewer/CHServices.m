@@ -175,11 +175,15 @@
         const uint8_t *bytes = d.bytes;
         NSUInteger len = d.length, start = 0;
         NSInteger lineNo = 0;
+        NSInteger badLines = 0;
         for (NSUInteger i = 0; i <= len; i++) {
             if (i == len || bytes[i] == '\n') {
                 if (i > start) {
                     NSData *line = [d subdataWithRange:NSMakeRange(start, i - start)];
-                    id obj = [NSJSONSerialization JSONObjectWithData:line options:0 error:nil];
+                    id obj = nil;
+                    @try {
+                        obj = [NSJSONSerialization JSONObjectWithData:line options:0 error:nil];
+                    } @catch (__unused NSException *e) { obj = nil; }
                     if ([obj isKindOfClass:[NSDictionary class]]) {
                         CHRecord *r = [CHRecord new];
                         r.raw = obj;
@@ -187,15 +191,26 @@
                         r.date = [NSDate dateWithTimeIntervalSince1970:r.t];
                         r.layer = obj[@"layer"] ?: @"?";
                         r.type  = obj[@"type"]  ?: @"?";
-                        r.srcFile = p;          // ★ 来源文件
-                        r.lineIdx = lineNo;     // ★ 行号
+                        r.srcFile = p;
+                        r.lineIdx = lineNo;
                         [out addObject:r];
+                    } else {
+                        badLines++;
+                        // 前 3 条坏行打到控制台，便于诊断
+                        if (badLines <= 3) {
+                            NSString *txt = [[NSString alloc] initWithData:line encoding:NSUTF8StringEncoding];
+                            NSLog(@"[CryptoViewer] 坏行 %@:%ld len=%lu head=%@",
+                                  [p lastPathComponent], (long)lineNo,
+                                  (unsigned long)line.length,
+                                  txt.length > 120 ? [txt substringToIndex:120] : txt);
+                        }
                     }
                 }
                 start = i + 1;
                 lineNo++;
             }
         }
+        if (badLines > 0) NSLog(@"[CryptoViewer] %@ 有 %ld 行无法解析", p, (long)badLines);
     }
     [out sortUsingComparator:^NSComparisonResult(CHRecord *a, CHRecord *b) {
         return a.t > b.t ? NSOrderedAscending : (a.t < b.t ? NSOrderedDescending : NSOrderedSame);
@@ -250,6 +265,21 @@
     }
     for (NSString *f in map) [self removeLines:map[f] fromFile:f];
     return total;
+}
+
+/// 列出该 App 的日志文件（供诊断/预览）
++ (NSArray<NSString *> *)rawLogPathsForApp:(CHApp *)app {
+    return app.logFiles ?: @[];
+}
+
+/// 读取某个日志文件的原始文本（最多 20000 字符）
++ (NSString *)rawTextOfFile:(NSString *)path {
+    NSData *d = [NSData dataWithContentsOfFile:path];
+    if (!d) return @"(读取失败)";
+    NSString *s = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+    if (!s) s = [NSString stringWithFormat:@"(非 UTF-8，%lu 字节)", (unsigned long)d.length];
+    if (s.length > 20000) s = [[s substringToIndex:20000] stringByAppendingString:@"\n…(截断)"];
+    return s;
 }
 
 + (NSInteger)clearApp:(CHApp *)app {
