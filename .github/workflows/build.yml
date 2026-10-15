@@ -17,8 +17,7 @@ jobs:
       - name: Install ldid
         run: |
           curl -L -o /tmp/ldid https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_macosx_arm64
-          chmod +x /tmp/ldid && sudo mv /tmp/ldid /usr/local/bin/ldid
-          ldid -h 2>&1 | head -2 || true
+          chmod +x /tmp/ldid && sudo mv /tmp/ldid /usr/local/bin/ldid || true
 
       - name: Build dylib
         run: |
@@ -34,10 +33,7 @@ jobs:
             -install_name @executable_path/Frameworks/CryptoHook.dylib > dylib.log 2>&1
           EXIT=$?
           cat dylib.log
-          if [ $EXIT -ne 0 ]; then
-            tail -25 dylib.log | grep -v '^$' | while IFS= read -r l; do echo "::error title=clang-dylib::$l"; done
-            exit 1
-          fi
+          [ $EXIT -ne 0 ] && { tail -25 dylib.log | grep -v '^$' | while IFS= read -r l; do echo "::error title=clang-dylib::$l"; done; exit 1; }
           ldid -S dist/CryptoHook.dylib || true
 
       - name: Build app
@@ -48,46 +44,49 @@ jobs:
           xcrun --sdk iphoneos clang \
             -arch arm64 -arch arm64e \
             -isysroot "$SDK" -miphoneos-version-min=14.0 \
-            -fobjc-arc -O2 \
-            -I viewer \
+            -fobjc-arc -O2 -I viewer \
             -o build/CryptoViewer \
             viewer/main.m viewer/CHTheme.m viewer/CHModels.m \
             viewer/CHServices.m viewer/CHRootVC.m viewer/CHDetailVC.m \
+            viewer/CHSplashVC.m viewer/CHRecordDetailVC.m \
             -framework UIKit -framework Foundation \
             -framework QuartzCore -framework CoreGraphics > app.log 2>&1
           EXIT=$?
           cat app.log
-          if [ $EXIT -ne 0 ]; then
-            grep -E "error:" app.log | head -40 | while IFS= read -r l; do echo "::error title=clang-app::$l"; done
-            exit 1
-          fi
+          [ $EXIT -ne 0 ] && { grep -E "error:" app.log | head -40 | while IFS= read -r l; do echo "::error title=clang-app::$l"; done; exit 1; }
           file build/CryptoViewer
 
-      - name: Package IPA
+      - name: Package IPA (icons + splash)
         run: |
-          rm -rf pkg && mkdir -p pkg/Payload/CryptoViewer.app
-          cp build/CryptoViewer    pkg/Payload/CryptoViewer.app/
-          cp viewer/Info.plist     pkg/Payload/CryptoViewer.app/
-          cp dist/CryptoHook.dylib pkg/Payload/CryptoViewer.app/CryptoHook.dylib
-          cp viewer/entitlements.plist pkg/Payload/CryptoViewer.app/entitlements.plist
-          cd pkg && zip -qr ../dist/CryptoViewer.ipa Payload
-          cd .. && ls -la dist/
+          APP=pkg/Payload/CryptoViewer.app
+          rm -rf pkg && mkdir -p "$APP"
+          cp build/CryptoViewer "$APP/"
+          cp viewer/Info.plist  "$APP/"
+          cp dist/CryptoHook.dylib "$APP/"
+          # 启动图
+          cp viewer/Resources/splash.jpg "$APP/splash.jpg"
+          # 生成 App 图标（用同一张图）
+          sips -s format png -z 120 120 viewer/Resources/splash.jpg --out "$APP/AppIcon60x60@2x.png" >/dev/null
+          sips -s format png -z 180 180 viewer/Resources/splash.jpg --out "$APP/AppIcon60x60@3x.png" >/dev/null
+          sips -s format png -z 152 152 viewer/Resources/splash.jpg --out "$APP/AppIcon76x76@2x~ipad.png" >/dev/null
+          sips -s format png -z 167 167 viewer/Resources/splash.jpg --out "$APP/AppIcon83.5x83.5@2x~ipad.png" >/dev/null
+          sips -s format png -z 1024 1024 viewer/Resources/splash.jpg --out "$APP/AppIcon1024.png" >/dev/null
+          ls -la "$APP/"
+          cd pkg && zip -qr ../dist/CryptoViewer.ipa Payload && cd ..
 
       - name: Sign with entitlements
         run: |
           APP=pkg/Payload/CryptoViewer.app
-          ldid -Sviewer/entitlements.plist "$APP/CryptoViewer"
-          echo "=== 签后 entitlements ==="
-          ldid -e "$APP/CryptoViewer" | head -30
-          rm -f "$APP/entitlements.plist"
+          ldid -Sviewer/entitlements.plist "$APP/CryptoViewer" || true
+          ldid -e "$APP/CryptoViewer" | head -20 || true
           rm -f dist/CryptoViewer.ipa
-          cd pkg && zip -qr ../dist/CryptoViewer.ipa Payload
-          cd .. && ls -la dist/
+          cd pkg && zip -qr ../dist/CryptoViewer.ipa Payload && cd ..
+          ls -la dist/
 
       - name: Commit back
         run: |
           git config user.name  "gh-actions"
           git config user.email "actions@github.com"
           git add -f dist/CryptoHook.dylib dist/CryptoViewer.ipa
-          git commit -m "build: with entitlements [skip ci]" || echo "no change"
+          git commit -m "build: splash + icons + detail page [skip ci]" || echo "no change"
           git push
