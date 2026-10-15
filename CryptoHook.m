@@ -618,6 +618,212 @@ static void my_CC_SHA512(const void *data, CC_LONG len, unsigned char *md) {
 }
 DYLD_INTERPOSE(my_CC_SHA512, CC_SHA512)
 
+// ============================================================
+// 补齐：大众算法的所有 API 入口
+// ============================================================
+
+// ── ① AES-GCM（现代协议主流）──
+static CCCryptorStatus my_CCCryptorGCM(CCOperation op, CCAlgorithm alg,
+    const void *key, size_t keyLen, const void *iv, size_t ivLen,
+    const void *aData, size_t aDataLen, const void *dataIn, size_t dataInLen,
+    void *dataOut, void *tagOut) {
+    if (cfgOn(@"L1") && rateGate("GCM", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCCryptorGCM");
+        d[@"op"] = (op == kCCEncrypt) ? @"ENC" : @"DEC";
+        d[@"alg"] = @(alg);
+        d[@"algo"] = @"AES-GCM";
+        d[@"key"] = hexStr(key, keyLen, 128);
+        d[@"iv"] = hexStr(iv, ivLen, 64);
+        if (aData && aDataLen) d[@"aad"] = hexStr(aData, aDataLen, 512);
+        d[@"inLen"] = @(dataInLen);
+        d[@"in"] = hexStr(dataIn, dataInLen, 4096);
+        NSString *t = tryUTF8(dataIn, dataInLen); if (t) d[@"inText"] = t;
+        emit(d);
+    }
+    CCCryptorStatus r = CCCryptorGCM(op, alg, key, keyLen, iv, ivLen,
+                                     aData, aDataLen, dataIn, dataInLen, dataOut, tagOut);
+    if (cfgOn(@"L1") && rateGate("GCMout", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCCryptorGCM.out");
+        if (dataOut) d[@"out"] = hexStr(dataOut, dataInLen, 4096);
+        if (tagOut)  d[@"tag"] = hexStr(tagOut, 16, 16);
+        emit(d);
+    }
+    return r;
+}
+DYLD_INTERPOSE(my_CCCryptorGCM, CCCryptorGCM)
+
+// ── ② CCCryptorGCMOneshot（新 API）──
+static int my_CCCryptorGCMOneshotEncrypt(CCAlgorithm alg, const void *key, size_t keyLen,
+    const void *iv, size_t ivLen, const void *aData, size_t aDataLen,
+    const void *p, size_t pLen, void *c, void *tag) {
+    if (cfgOn(@"L1") && rateGate("GCM1enc", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCCryptorGCMOneshot.ENC");
+        d[@"algo"] = @"AES-GCM";
+        d[@"key"] = hexStr(key, keyLen, 128);
+        d[@"iv"] = hexStr(iv, ivLen, 64);
+        d[@"inLen"] = @(pLen);
+        d[@"in"] = hexStr(p, pLen, 4096);
+        NSString *t = tryUTF8(p, pLen); if (t) d[@"inText"] = t;
+        emit(d);
+    }
+    int r = CCCryptorGCMOneshotEncrypt(alg, key, keyLen, iv, ivLen, aData, aDataLen, p, pLen, c, tag);
+    if (cfgOn(@"L1") && c && rateGate("GCM1encOut", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCCryptorGCMOneshot.ENC.out");
+        d[@"out"] = hexStr(c, pLen, 4096);
+        if (tag) d[@"tag"] = hexStr(tag, 16, 16);
+        emit(d);
+    }
+    return r;
+}
+DYLD_INTERPOSE(my_CCCryptorGCMOneshotEncrypt, CCCryptorGCMOneshotEncrypt)
+
+static int my_CCCryptorGCMOneshotDecrypt(CCAlgorithm alg, const void *key, size_t keyLen,
+    const void *iv, size_t ivLen, const void *aData, size_t aDataLen,
+    const void *c, size_t cLen, void *p, const void *tag) {
+    if (cfgOn(@"L1") && rateGate("GCM1dec", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCCryptorGCMOneshot.DEC");
+        d[@"algo"] = @"AES-GCM";
+        d[@"key"] = hexStr(key, keyLen, 128);
+        d[@"iv"] = hexStr(iv, ivLen, 64);
+        if (aData && aDataLen) d[@"aad"] = hexStr(aData, aDataLen, 512);
+        d[@"inLen"] = @(cLen);
+        d[@"in"] = hexStr(c, cLen, 4096);
+        if (tag) d[@"tag"] = hexStr(tag, 16, 16);
+        emit(d);
+    }
+    int r = CCCryptorGCMOneshotDecrypt(alg, key, keyLen, iv, ivLen, aData, aDataLen, c, cLen, p, tag);
+    if (cfgOn(@"L1") && p && rateGate("GCM1decOut", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCCryptorGCMOneshot.DEC.out");
+        d[@"out"] = hexStr(p, cLen, 4096);
+        NSString *t = tryUTF8(p, cLen); if (t) d[@"outText"] = t;
+        emit(d);
+    }
+    return r;
+}
+DYLD_INTERPOSE(my_CCCryptorGCMOneshotDecrypt, CCCryptorGCMOneshotDecrypt)
+
+// ── ③ 显式模式的 CryptorCreate（CTR/CFB/OFB/GCM 都走这里）──
+static CCCryptorStatus my_CCCryptorCreateWithMode(CCOperation op, CCMode mode,
+    CCAlgorithm alg, CCPadding padding, const void *iv,
+    const void *key, size_t keyLen, const void *tweak, size_t tweakLen,
+    int numRounds, CCOptions options, CCCryptorRef *ref) {
+    if (cfgOn(@"L1") && rateGate("WithMode", cfgRate())) {
+        static const char *modes[] = {"ECB","CBC","CFB","CTR","OFB","XTS","GCM","CCM","XTS"};
+        static const char *algs[] = {"AES","DES","3DES","CAST","RC4","RC2","Blowfish"};
+        NSMutableDictionary *d = base(@"L1", @"CCCryptorCreateWithMode");
+        d[@"op"] = (op == kCCEncrypt) ? @"ENC" : @"DEC";
+        d[@"alg"] = @(alg);
+        d[@"algo"] = (alg < 7) ? @(algs[alg]) : @(alg);
+        d[@"mode"] = (mode < 9) ? @(modes[mode]) : @(mode);
+        d[@"key"] = hexStr(key, keyLen, 128);
+        if (iv) d[@"iv"] = hexStr(iv, 32, 64);
+        if (tweak && tweakLen) d[@"tweak"] = hexStr(tweak, tweakLen, 64);
+        emit(d);
+    }
+    return CCCryptorCreateWithMode(op, mode, alg, padding, iv, key, keyLen,
+                                   tweak, tweakLen, numRounds, options, ref);
+}
+DYLD_INTERPOSE(my_CCCryptorCreateWithMode, CCCryptorCreateWithMode)
+
+// ── ④ CCHmac 流式（Init/Update/Final）──
+static void my_CCHmacInit(CCHmacContext *ctx, CCHmacAlgorithm alg, const void *key, size_t keyLen) {
+    if (cfgOn(@"L1") && rateGate("HmacInit", cfgRate())) {
+        static const char *n[] = {"HMAC-SHA1","HMAC-MD5","HMAC-SHA256","HMAC-SHA384","HMAC-SHA512","HMAC-SHA224"};
+        NSMutableDictionary *d = base(@"L1", @"CCHmacInit");
+        d[@"algo"] = (alg < 6) ? @(n[alg]) : @(alg);
+        d[@"key"] = hexStr(key, keyLen, 128);
+        d[@"keyLen"] = @(keyLen);
+        emit(d);
+    }
+    CCHmacInit(ctx, alg, key, keyLen);
+}
+DYLD_INTERPOSE(my_CCHmacInit, CCHmacInit)
+
+static void my_CCHmacUpdate(CCHmacContext *ctx, const void *data, size_t dataLen) {
+    if (cfgOn(@"L1") && rateGate("HmacUpd", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCHmacUpdate");
+        d[@"inLen"] = @(dataLen);
+        d[@"in"] = hexStr(data, dataLen, 4096);
+        NSString *t = tryUTF8(data, dataLen); if (t) d[@"inText"] = t;
+        emit(d);
+    }
+    CCHmacUpdate(ctx, data, dataLen);
+}
+DYLD_INTERPOSE(my_CCHmacUpdate, CCHmacUpdate)
+
+static void my_CCHmacFinal(CCHmacContext *ctx, void *macOut) {
+    CCHmacFinal(ctx, macOut);
+    if (cfgOn(@"L1") && macOut && rateGate("HmacFin", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCHmacFinal");
+        d[@"mac"] = hexStr(macOut, 32, 32);
+        emit(d);
+    }
+}
+DYLD_INTERPOSE(my_CCHmacFinal, CCHmacFinal)
+
+// ── ⑤ 通用摘要 CCDigest（Swift CryptoKit / 现代代码走这里）──
+static int my_CCDigest(CCDigestAlgorithm alg, const uint8_t *data, size_t len, uint8_t *md) {
+    static const char *n[] = {"NULL","SHA1","SHA224","SHA256","SHA384","SHA512",
+                              "MD2","MD4","MD5","SHA3-224","SHA3-256","SHA3-384","SHA3-512"};
+    if (cfgOn(@"L1") && rateGate("Digest", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CCDigest");
+        d[@"algo"] = (alg < 13) ? @(n[alg]) : @(alg);
+        d[@"inLen"] = @(len);
+        d[@"in"] = hexStr(data, len, 4096);
+        NSString *t = tryUTF8(data, len); if (t) d[@"inText"] = t;
+        int r = CCDigest(alg, data, len, md);
+        if (md) d[@"hash"] = hexStr(md, 64, 64);
+        emit(d);
+        return r;
+    }
+    return CCDigest(alg, data, len, md);
+}
+DYLD_INTERPOSE(my_CCDigest, CCDigest)
+
+// ── ⑥ 冷门哈希 SHA224/384、MD2/MD4 ──
+static void my_CC_SHA224(const void *d_, CC_LONG len, unsigned char *md) {
+    if (cfgOn(@"L1") && rateGate("SHA224", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CC_SHA224");
+        d[@"inLen"] = @(len); d[@"in"] = hexStr(d_, len, 4096);
+        CC_SHA224(d_, len, md); if (md) d[@"hash"] = hexStr(md, 28, 28);
+        emit(d); return;
+    }
+    CC_SHA224(d_, len, md);
+}
+DYLD_INTERPOSE(my_CC_SHA224, CC_SHA224)
+
+static void my_CC_SHA384(const void *d_, CC_LONG len, unsigned char *md) {
+    if (cfgOn(@"L1") && rateGate("SHA384", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CC_SHA384");
+        d[@"inLen"] = @(len); d[@"in"] = hexStr(d_, len, 4096);
+        CC_SHA384(d_, len, md); if (md) d[@"hash"] = hexStr(md, 48, 48);
+        emit(d); return;
+    }
+    CC_SHA384(d_, len, md);
+}
+DYLD_INTERPOSE(my_CC_SHA384, CC_SHA384)
+
+// ── ⑦ 签名（SecKeyCreateSignature / RawSign）──
+static CFDataRef my_SecKeyCreateSignature(SecKeyRef key, SecKeyAlgorithm alg,
+    CFDataRef data, CFErrorRef *err) {
+    if (cfgOn(@"L1") && rateGate("Sign", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyCreateSignature");
+        d[@"alg"] = (__bridge id)alg ?: @"?";
+        d[@"inLen"] = @(CFDataGetLength(data));
+        d[@"in"] = hexStr(CFDataGetBytePtr(data), CFDataGetLength(data), 4096);
+        NSString *t = tryUTF8(CFDataGetBytePtr(data), CFDataGetLength(data));
+        if (t) d[@"inText"] = t;
+        CFDataRef out = SecKeyCreateSignature(key, alg, data, err);
+        if (out) { d[@"sigLen"] = @(CFDataGetLength(out));
+                   d[@"sig"] = hexStr(CFDataGetBytePtr(out), CFDataGetLength(out), 512); }
+        emit(d);
+        return out;
+    }
+    return SecKeyCreateSignature(key, alg, data, err);
+}
+DYLD_INTERPOSE(my_SecKeyCreateSignature, SecKeyCreateSignature)
+
+
 
 // ============================================================
 // L2：明文字符串（明文的必经之路）★ 核心
