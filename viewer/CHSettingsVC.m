@@ -1,6 +1,8 @@
 // CHSettingsVC.m — 设置（保守写法：不用 superview、不用 statement expression）
 #import "CHSettingsVC.h"
 #import "CHTheme.h"
+#import "CHServices.h"
+#import "CHModels.h"
 
 #define CFG_DIR  @"/var/mobile/Library/CryptoHook"
 #define CFG_PATH [CFG_DIR stringByAppendingPathComponent:@"config.plist"]
@@ -69,10 +71,26 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
 
 - (void)saveCfg {
     @try {
-        [[NSFileManager defaultManager] createDirectoryAtPath:CFG_DIR
-            withIntermediateDirectories:YES attributes:nil error:nil];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        // ① 共享目录（有权限的 App 能读到）
+        [fm createDirectoryAtPath:CFG_DIR withIntermediateDirectories:YES attributes:nil error:nil];
         [self.cfg writeToFile:CFG_PATH atomically:YES];
-        NSLog(@"[CryptoHook] cfg %@ -> %@", self.cfg, CFG_PATH);
+
+        // ② ★ 关键：写到每个已注入 App 的沙盒 —— dylib 真正能读的地方
+        NSArray *apps = [CHScanner allApps];
+        NSInteger n = 0;
+        for (CHApp *a in apps) {
+            if (a.dataPath.length == 0) continue;
+            if (a.recordCount == 0) continue;          // 只给"注入过"的 App 写（有记录=注入过）
+            NSString *d = [a.dataPath stringByAppendingPathComponent:@"Documents/CryptoHook"];
+            if (![fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil]) continue;
+            if ([self.cfg writeToFile:[d stringByAppendingPathComponent:@"config.plist"] atomically:YES]) n++;
+            // 顺带缓存目录也放一份（有些 App 只允许写 Caches）
+            NSString *d2 = [a.dataPath stringByAppendingPathComponent:@"Library/Caches/CryptoHook"];
+            if ([fm createDirectoryAtPath:d2 withIntermediateDirectories:YES attributes:nil error:nil])
+                [self.cfg writeToFile:[d2 stringByAppendingPathComponent:@"config.plist"] atomically:YES];
+        }
+        NSLog(@"[CryptoHook] cfg saved -> %@ (并写入 %ld 个 App 沙盒)", CFG_PATH, (long)n);
     } @catch (NSException *e) {
         NSLog(@"[CryptoHook] saveCfg 失败: %@", e);
     }
