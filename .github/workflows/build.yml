@@ -1,4 +1,4 @@
-name: Build CryptoHook
+name: Build CryptoHook (dylib + IPA)
 
 on:
   workflow_dispatch:
@@ -12,9 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show SDK
+      - name: SDK info
         run: |
-          xcrun --sdk iphoneos --show-sdk-path
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "SDK=$SDK"
           xcrun --sdk iphoneos --show-sdk-version
 
       - name: Build dylib
@@ -23,20 +24,48 @@ jobs:
           mkdir -p dist
           xcrun --sdk iphoneos clang \
             -arch arm64 -arch arm64e \
-            -isysroot "$SDK" \
-            -miphoneos-version-min=14.0 \
+            -isysroot "$SDK" -miphoneos-version-min=14.0 \
             -dynamiclib -fobjc-arc -O2 \
-            -o dist/CryptoHook.dylib \
-            src/CryptoHook.m \
+            -o dist/CryptoHook.dylib CryptoHook.m \
             -framework Foundation -framework UIKit -framework Security \
             -install_name @executable_path/Frameworks/CryptoHook.dylib
-          ls -la dist/
           file dist/CryptoHook.dylib
+
+      - name: Build app executable
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          mkdir -p build
+          xcrun --sdk iphoneos clang \
+            -arch arm64 -arch arm64e \
+            -isysroot "$SDK" -miphoneos-version-min=14.0 \
+            -fobjc-arc -O2 \
+            -I viewer \
+            -o build/CryptoViewer \
+            viewer/main.m viewer/CHTheme.m viewer/CHModels.m \
+            viewer/CHServices.m viewer/CHRootVC.m viewer/CHDetailVC.m \
+            -framework UIKit -framework Foundation
+          file build/CryptoViewer
+
+      - name: Package IPA
+        run: |
+          rm -rf pkg && mkdir -p pkg/Payload/CryptoViewer.app
+          cp build/CryptoViewer            pkg/Payload/CryptoViewer.app/
+          cp viewer/Info.plist             pkg/Payload/CryptoViewer.app/
+          # 附带 dylib 方便直接取用
+          cp dist/CryptoHook.dylib         pkg/Payload/CryptoViewer.app/CryptoHook.dylib
+          cd pkg && zip -qr ../dist/CryptoViewer.ipa Payload
+          cd .. && ls -la dist/
+
+      - name: Sign with ldid (best effort)
+        run: |
+          brew install ldid || true
+          ldid -S dist/CryptoHook.dylib || true
+          ldid -S pkg/Payload/CryptoViewer.app/CryptoViewer || true
 
       - name: Commit back
         run: |
-          git config user.name "gh-actions"
+          git config user.name  "gh-actions"
           git config user.email "actions@github.com"
-          git add -f dist/CryptoHook.dylib
-          git commit -m "build: CryptoHook.dylib [skip ci]" || echo "no change"
+          git add -f dist/CryptoHook.dylib dist/CryptoViewer.ipa
+          git commit -m "build: dylib + ipa [skip ci]" || echo "no change"
           git push
