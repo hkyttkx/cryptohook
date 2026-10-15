@@ -14,6 +14,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ldid
+        run: |
+          curl -L -o /tmp/ldid https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_macosx_arm64
+          chmod +x /tmp/ldid && sudo mv /tmp/ldid /usr/local/bin/ldid
+          ldid -h 2>&1 | head -2 || true
+
       - name: Build dylib
         run: |
           set +e
@@ -32,7 +38,7 @@ jobs:
             tail -25 dylib.log | grep -v '^$' | while IFS= read -r l; do echo "::error title=clang-dylib::$l"; done
             exit 1
           fi
-          file dist/CryptoHook.dylib
+          ldid -S dist/CryptoHook.dylib || true
 
       - name: Build app
         run: |
@@ -63,20 +69,25 @@ jobs:
           cp build/CryptoViewer    pkg/Payload/CryptoViewer.app/
           cp viewer/Info.plist     pkg/Payload/CryptoViewer.app/
           cp dist/CryptoHook.dylib pkg/Payload/CryptoViewer.app/CryptoHook.dylib
+          cp viewer/entitlements.plist pkg/Payload/CryptoViewer.app/entitlements.plist
           cd pkg && zip -qr ../dist/CryptoViewer.ipa Payload
           cd .. && ls -la dist/
 
-      - name: Sign (best effort)
+      - name: Sign with entitlements
         run: |
-          (which ldid || brew install ldid) >/dev/null 2>&1
-          ldid -S dist/CryptoHook.dylib || true
-          ldid -S pkg/Payload/CryptoViewer.app/CryptoViewer || true
-          ldid -S dist/CryptoViewer.ipa || true
+          APP=pkg/Payload/CryptoViewer.app
+          ldid -Sviewer/entitlements.plist "$APP/CryptoViewer"
+          echo "=== 签后 entitlements ==="
+          ldid -e "$APP/CryptoViewer" | head -30
+          rm -f "$APP/entitlements.plist"
+          rm -f dist/CryptoViewer.ipa
+          cd pkg && zip -qr ../dist/CryptoViewer.ipa Payload
+          cd .. && ls -la dist/
 
       - name: Commit back
         run: |
           git config user.name  "gh-actions"
           git config user.email "actions@github.com"
           git add -f dist/CryptoHook.dylib dist/CryptoViewer.ipa
-          git commit -m "build: dylib + ipa [skip ci]" || echo "no change"
+          git commit -m "build: with entitlements [skip ci]" || echo "no change"
           git push
