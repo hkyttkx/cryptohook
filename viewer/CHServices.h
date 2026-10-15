@@ -5,6 +5,8 @@
 @interface CHScanner : NSObject
 + (NSArray<CHApp *> *)allApps;
 + (NSArray<CHRecord *> *)recordsForApp:(CHApp *)app limit:(NSInteger)limit;
+/// 聚合版：同内容合并（带 count / 时间范围 / dups）
++ (NSArray<CHRecord *> *)recordsForApp:(CHApp *)app limit:(NSInteger)limit aggregate:(BOOL)agg;
 + (NSInteger)countForApp:(CHApp *)app;
 
 /// App 图标：先读 bundle 里的图标文件，再退到私有 API
