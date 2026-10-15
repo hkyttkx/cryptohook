@@ -252,6 +252,34 @@ static NSString *callerOutsideSystem(int skip) {
 }
 
 // ============================================================
+// CCCryptorRef 缓存：把 Create 时的 KEY/IV 带到后续 Update
+// ============================================================
+static NSMutableDictionary *gRefMap = nil;
+static pthread_mutex_t gRefLock = PTHREAD_MUTEX_INITIALIZER;
+
+static void refStore(void *ref, NSDictionary *info) {
+    if (!ref || !info) return;
+    pthread_mutex_lock(&gRefLock);
+    if (!gRefMap) gRefMap = [NSMutableDictionary new];
+    if (gRefMap.count > 512) [gRefMap removeAllObjects];   // 防泄漏
+    gRefMap[[NSValue valueWithPointer:ref]] = info;
+    pthread_mutex_unlock(&gRefLock);
+}
+static NSDictionary *refLoad(void *ref) {
+    if (!ref) return nil;
+    pthread_mutex_lock(&gRefLock);
+    NSDictionary *d = gRefMap ? gRefMap[[NSValue valueWithPointer:ref]] : nil;
+    pthread_mutex_unlock(&gRefLock);
+    return d;
+}
+static void refDrop(void *ref) {
+    if (!ref) return;
+    pthread_mutex_lock(&gRefLock);
+    if (gRefMap) [gRefMap removeObjectForKey:[NSValue valueWithPointer:ref]];
+    pthread_mutex_unlock(&gRefLock);
+}
+
+// ============================================================
 // L1：系统加密 API（dyld interpose）
 // ============================================================
 #define DYLD_INTERPOSE(_rep,_old) \
@@ -268,13 +296,13 @@ static CCCryptorStatus my_CCCrypt(CCOperation op, CCAlgorithm alg, CCOptions opt
         d[@"op"]  = (op == kCCEncrypt) ? @"ENC" : @"DEC";
         d[@"alg"] = @(alg);
         d[@"opt"] = @(opt);
-        d[@"key"] = hexStr(key, keyLen, 64);
-        if (iv) d[@"iv"] = hexStr(iv, 16, 16);
-        d[@"in"]  = hexStr(in, inLen, 128);
+        d[@"key"] = hexStr(key, keyLen, 128);
+        if (iv) d[@"iv"] = hexStr(iv, 32, 32);
+        d[@"in"]  = hexStr(in, inLen, 4096);
         d[@"inLen"] = @(inLen);
         NSString *t = tryUTF8(in, inLen); if (t) d[@"inText"] = t;
         if (out && moved && *moved) {
-            d[@"out"] = hexStr(out, *moved, 128);
+            d[@"out"] = hexStr(out, *moved, 4096);
             d[@"outLen"] = @(*moved);
             NSString *o = tryUTF8(out, *moved); if (o) d[@"outText"] = o;
         }
@@ -288,15 +316,22 @@ DYLD_INTERPOSE(my_CCCrypt, CCCrypt)
 static CCCryptorStatus my_CCCryptorCreate(CCOperation op, CCAlgorithm alg, CCOptions opt,
     const void *key, size_t keyLen, const void *iv, CCCryptorRef *ref) {
     if (!cfgOn(@"L1")) return CCCryptorCreate(op,alg,opt,key,keyLen,iv,ref);
-    if (rateGate("CCCreate", cfgRate())) {
+    CCCryptorStatus r = CCCryptorCreate(op,alg,opt,key,keyLen,iv,ref);
+    // ★ 保存这段会话的 KEY/IV，供后续 Update 使用
+    NSDictionary *info = @{
+        @"op":  (op==kCCEncrypt)?@"ENC":@"DEC",
+        @"alg": @(alg),
+        @"opt": @(opt),
+        @"key": hexStr(key, keyLen, 128),
+        @"iv":  iv ? hexStr(iv, 16, 32) : @""
+    };
+    if (ref && *ref) refStore((void *)*ref, info);
+    if (cfgOn(@"L1") && rateGate("CCCreate", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CCCryptorCreate");
-        d[@"op"] = (op==kCCEncrypt)?@"ENC":@"DEC";
-        d[@"alg"] = @(alg);
-        d[@"key"] = hexStr(key, keyLen, 64);
-        if (iv) d[@"iv"] = hexStr(iv, 16, 16);
+        [d addEntriesFromDictionary:info];
         emit(d);
     }
-    return CCCryptorCreate(op,alg,opt,key,keyLen,iv,ref);
+    return r;
 }
 DYLD_INTERPOSE(my_CCCryptorCreate, CCCryptorCreate)
 
@@ -306,13 +341,22 @@ static CCCryptorStatus my_CCCryptorUpdate(CCCryptorRef ref, const void *in, size
     if (!cfgOn(@"L1")) return r;
     if (rateGate("CCUpdate", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CCCryptorUpdate");
-        d[@"in"] = hexStr(in, inLen, 128);
+        // ★ 补上本次会话的 KEY/IV（来自 Create）
+        NSDictionary *info = refLoad((void *)ref);
+        if (info) [d addEntriesFromDictionary:info];
+        d[@"in"] = hexStr(in, inLen, 4096);
         d[@"inLen"] = @(inLen);
-        if (out && moved && *moved) { d[@"out"] = hexStr(out, *moved, 128); d[@"outLen"] = @(*moved); }
+        if (out && moved && *moved) { d[@"out"] = hexStr(out, *moved, 4096); d[@"outLen"] = @(*moved); }
         emit(d);
     }
     return r;
 }
+
+static void my_CCCryptorRelease(CCCryptorRef ref) {
+    if (ref) refDrop((void *)ref);
+    CCCryptorRelease(ref);
+}
+DYLD_INTERPOSE(my_CCCryptorRelease, CCCryptorRelease)
 DYLD_INTERPOSE(my_CCCryptorUpdate, CCCryptorUpdate)
 
 static void my_CCHmac(CCHmacAlgorithm alg, const void *key, size_t keyLen,
@@ -321,8 +365,8 @@ static void my_CCHmac(CCHmacAlgorithm alg, const void *key, size_t keyLen,
     if (rateGate("CCHmac", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CCHmac");
         d[@"alg"] = @(alg);
-        d[@"key"] = hexStr(key, keyLen, 64);
-        d[@"data"] = hexStr(data, dataLen, 128);
+        d[@"key"] = hexStr(key, keyLen, 128);
+        d[@"data"] = hexStr(data, dataLen, 4096);
         d[@"dataLen"] = @(dataLen);
         size_t dl = (alg==kCCHmacAlgSHA256)?32:(alg==kCCHmacAlgSHA1)?20:(alg==kCCHmacAlgSHA512)?64:16;
         if (out) d[@"mac"] = hexStr(out, dl, dl);
@@ -336,7 +380,7 @@ static void my_CC_SHA256(const void *data, CC_LONG len, unsigned char *md) {
     if (!cfgOn(@"L1")) { CC_SHA256(data,len,md); return; }
     if (rateGate("SHA256", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"CC_SHA256");
-        d[@"in"] = hexStr(data, len, 96);
+        d[@"in"] = hexStr(data, len, 4096);
         d[@"inLen"] = @(len);
         NSString *t = tryUTF8(data, len); if (t) d[@"inText"] = t;
         CC_SHA256(data,len,md);
@@ -354,7 +398,7 @@ static CFDataRef my_SecKeyCreateEncryptedData(SecKeyRef key, SecKeyAlgorithm alg
     if (rateGate("SecEnc", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"SecKeyEncrypt");
         d[@"alg"] = (__bridge id)alg ?: @"?";
-        d[@"in"] = hexStr(CFDataGetBytePtr(data), CFDataGetLength(data), 128);
+        d[@"in"] = hexStr(CFDataGetBytePtr(data), CFDataGetLength(data), 4096);
         d[@"inLen"] = @(CFDataGetLength(data));
         NSString *t = tryUTF8(CFDataGetBytePtr(data), CFDataGetLength(data)); if (t) d[@"inText"] = t;
         emit(d);
@@ -369,14 +413,14 @@ static CFDataRef my_SecKeyCreateDecryptedData(SecKeyRef key, SecKeyAlgorithm alg
     if (rateGate("SecDec", cfgRate())) {
         NSMutableDictionary *d = base(@"L1", @"SecKeyDecrypt");
         d[@"alg"] = (__bridge id)alg ?: @"?";
-        d[@"in"] = hexStr(CFDataGetBytePtr(data), CFDataGetLength(data), 128);
+        d[@"in"] = hexStr(CFDataGetBytePtr(data), CFDataGetLength(data), 4096);
         d[@"inLen"] = @(CFDataGetLength(data));
         emit(d);
     }
     CFDataRef out = SecKeyCreateDecryptedData(key,alg,data,err);
     if (out && rateGate("SecDecOut", 50)) {
         NSMutableDictionary *d = base(@"L1", @"SecKeyDecrypt.out");
-        d[@"out"] = hexStr(CFDataGetBytePtr(out), CFDataGetLength(out), 128);
+        d[@"out"] = hexStr(CFDataGetBytePtr(out), CFDataGetLength(out), 4096);
         NSString *t = tryUTF8(CFDataGetBytePtr(out), CFDataGetLength(out)); if (t) d[@"outText"] = t;
         emit(d);
     }
@@ -455,7 +499,7 @@ static NSURLSessionDataTask *my_dataTask(id self, SEL _cmd, NSURLRequest *req,
         NSData *body = req.HTTPBody;
         if (body) {
             d[@"reqLen"] = @(body.length);
-            d[@"req"] = hexStr(body.bytes, body.length, 192);
+            d[@"req"] = hexStr(body.bytes, body.length, 4096);
             NSString *t = tryUTF8(body.bytes, body.length); if (t) d[@"reqText"] = t;
         }
         // 关键请求头
@@ -476,7 +520,7 @@ static NSURLSessionDataTask *my_dataTask(id self, SEL _cmd, NSURLRequest *req,
             d[@"status"] = @([(NSHTTPURLResponse *)resp statusCode]);
             if (data) {
                 d[@"respLen"] = @(data.length);
-                d[@"resp"] = hexStr(data.bytes, data.length, 192);
+                d[@"resp"] = hexStr(data.bytes, data.length, 4096);
                 NSString *t = tryUTF8(data.bytes, data.length); if (t) d[@"respText"] = t;
             }
             if (err) d[@"error"] = err.localizedDescription;
