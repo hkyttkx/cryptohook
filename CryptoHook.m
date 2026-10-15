@@ -154,7 +154,7 @@ static NSString *tryUTF8(const void *p, size_t n) {
     if (c < 0x09) return nil;
     return s;
 }
-static NSDictionary *base(NSString *layer, NSString *type) {
+static NSMutableDictionary *base(NSString *layer, NSString *type) {
     NSMutableDictionary *d = [@{
         @"t":  @([NSDate date].timeIntervalSince1970),
         @"pid":@(getpid()),
