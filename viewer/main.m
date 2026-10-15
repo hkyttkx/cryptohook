@@ -43,8 +43,20 @@
 
 @end
 
+// ── 崩溃日志（App 侧，写到 /tmp 便于排查）──
+static void CHCrashHandler(NSException *e) {
+    NSString *s = [NSString stringWithFormat:
+        @"=== CryptoViewer crash ===\n%@\n\nreason: %@\n\n%@\n",
+        [NSDate date], e.reason,
+        [e.callStackSymbols componentsJoinedByString:@"\n"]];
+    [s writeToFile:@"/tmp/CryptoViewer_crash.log" atomically:YES
+          encoding:NSUTF8StringEncoding error:nil];
+    NSLog(@"[CryptoViewer] CRASH: %@", e.reason);
+}
+
 int main(int argc, char *argv[]) {
     @autoreleasepool {
+        NSSetUncaughtExceptionHandler(&CHCrashHandler);
         return UIApplicationMain(argc, argv, nil, @"CHAppDelegate");
     }
 }
