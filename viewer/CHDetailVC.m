@@ -729,6 +729,9 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     [al addAction:[UIAlertAction actionWithTitle:@"导出分析报告 (.md)"
                           style:UIAlertActionStyleDefault
                         handler:^(UIAlertAction *a){ [self exportReport]; }]];
+    [al addAction:[UIAlertAction actionWithTitle:@"查看原始日志文件"
+                          style:UIAlertActionStyleDefault
+                        handler:^(UIAlertAction *a){ [self showRawLog]; }]];
     [al addAction:[UIAlertAction actionWithTitle:@"清空这个 App 的记录"
                           style:UIAlertActionStyleDestructive
                         handler:^(UIAlertAction *a){ [self confirmClearApp]; }]];
@@ -755,6 +758,31 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
         [self.table reloadData];
         NSLog(@"[CryptoViewer] 清空 %ld 个日志文件", (long)n);
     }]];
+    [self presentViewController:al animated:YES completion:nil];
+}
+
+/// 诊断：显示日志文件的原始文本
+- (void)showRawLog {
+    NSArray *paths = [CHScanner rawLogPathsForApp:self.app];
+    if (paths.count == 0) {
+        UIAlertController *al = [UIAlertController alertControllerWithTitle:@"没有日志文件"
+            message:@"该 App 没有任何 .log 文件（说明 dylib 没写入过）"
+            preferredStyle:UIAlertControllerStyleAlert];
+        [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:al animated:YES completion:nil];
+        return;
+    }
+    NSMutableString *m = [NSMutableString string];
+    for (NSString *p in paths) {
+        [m appendFormat:@"【%@】\n", [p lastPathComponent]];
+        NSString *txt = [CHScanner rawTextOfFile:p];
+        // 只显示前 4000 字符
+        if (txt.length > 4000) txt = [[txt substringToIndex:4000] stringByAppendingString:@"\n…(更多请用下方功能导出)"];
+        [m appendFormat:@"%@\n\n", txt];
+    }
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"原始日志内容"
+        message:m preferredStyle:UIAlertControllerStyleAlert];
+    [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:al animated:YES completion:nil];
 }
 
