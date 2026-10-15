@@ -374,6 +374,7 @@ static DataTaskIMP o_dataTask = NULL;
 
 static NSURLSessionDataTask *my_dataTask(id self, SEL _cmd, NSURLRequest *req,
                                          void (^completion)(NSData *, NSURLResponse *, NSError *)) {
+    if (!o_dataTask) return nil;                        // 兜底：原方法未拿到就不接管
     if (!cfgOn(@"L3")) return o_dataTask(self, _cmd, req, completion);
     if (rateGate("http", cfgRate())) {
         NSMutableDictionary *d = base(@"L3", @"HTTP.request");
