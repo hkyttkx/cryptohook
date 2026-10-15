@@ -24,4 +24,5 @@
 @property (nonatomic, copy, readonly) NSString *title;     // 卡片主标题
 @property (nonatomic, copy, readonly) NSString *subtitle;  // 卡片副标题
 @property (nonatomic, copy, readonly) NSString *detail;    // 展开内容
+@property (nonatomic, copy, readonly) NSString *algoTag;   // 算法标签（AES-256 / RC4 / HMAC-SHA256 …）
 @end
