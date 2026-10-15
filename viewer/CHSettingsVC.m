@@ -158,7 +158,7 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
     if (s == 0) return 4;
-    if (s == 1) return 3;   // 导出 dylib / 清空日志 / 配置路径
+    if (s == 1) return 4;   // 过滤规则 / 导出 dylib / 清空日志 / 配置路径
     return 1;
 }
 
@@ -189,10 +189,20 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
         c.selectionStyle = UITableViewCellSelectionStyleNone;
     } else if (ip.section == 1) {
         if (ip.row == 0) {
-            c.textLabel.text = @"导出 CryptoHook.dylib";
-            c.detailTextLabel.text = @"复制到 Documents 并分享（用于注入目标 App）";
-            c.textLabel.textColor = CH_ACCENT;
+            c.textLabel.text = @"过滤规则";
+            NSDictionary *cfg = [NSDictionary dictionaryWithContentsOfFile:CFG_PATH];
+            NSInteger n = 0;
+            for (NSString *k in @[@"excludeUrls", @"excludeTypes", @"excludeCallers", @"excludeKeywords"])
+                n += [(cfg[k] ?: @[]) count];
+            c.detailTextLabel.text = n ? [NSString stringWithFormat:@"已过滤 %ld 项（可移除）", (long)n]
+                                       : @"在详情页点 ⋯ 可把内容加入黑名单";
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            c.textLabel.textColor = CH_ORANGE;
         } else if (ip.row == 1) {
+            c.textLabel.text = @"导出 CryptoHook.dylib";
+            c.detailTextLabel.text = @"直接分享（用于注入目标 App）";
+            c.textLabel.textColor = CH_ACCENT;
+        } else if (ip.row == 2) {
             c.textLabel.text = @"清空所有日志";
             c.detailTextLabel.text = @"删除已收集的全部记录";
         } else {
@@ -210,8 +220,16 @@ static NSString *const kKeys[] = { @"L1", @"L2", @"L3", @"L4", NULL };
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [t deselectRowAtIndexPath:ip animated:YES];
     if (ip.section != 1) return;
-    if (ip.row == 0) { [self exportDylib]; return; }
-    if (ip.row == 1) {
+    if (ip.row == 0) {
+        Class fc = NSClassFromString(@"CHFilterVC");
+        if (fc) {
+            UIViewController *v = [[fc alloc] init];
+            [self.navigationController pushViewController:v animated:YES];
+        }
+        return;
+    }
+    if (ip.row == 1) { [self exportDylib]; return; }
+    if (ip.row == 2) {
         UIAlertController *al = [UIAlertController alertControllerWithTitle:@"清空日志"
             message:@"删除所有 App 已收集的记录？不可恢复。"
             preferredStyle:UIAlertControllerStyleAlert];
