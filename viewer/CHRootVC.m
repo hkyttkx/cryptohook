@@ -193,7 +193,6 @@
     self.table.delegate = self;
     self.table.backgroundColor = [UIColor clearColor];
     self.table.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.table.sectionHeadersPinToVisibleBounds = YES;   // ★ 分组标题吸顶
     if (@available(iOS 15.0, *)) self.table.sectionHeaderTopPadding = 0;
     self.table.rowHeight = 74;
     self.table.contentInset = UIEdgeInsetsMake(8, 0, 40, 0);
