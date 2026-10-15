@@ -444,14 +444,82 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
 }
 
 - (void)shareAll {
-    NSData *jd = [NSJSONSerialization dataWithJSONObject:self.record.raw
-                    options:NSJSONWritingPrettyPrinted error:nil];
-    NSString *s = [NSString stringWithFormat:@"[%@][%@] %@\n\n%@",
-                   self.record.layer, self.record.type, self.record.title,
-                   [[NSString alloc] initWithData:jd encoding:NSUTF8StringEncoding]];
+    NSString *txt = [self buildSingleText];
+    NSDateFormatter *tf = [NSDateFormatter new];
+    tf.dateFormat = @"HHmmss";
+    NSString *fn = [NSString stringWithFormat:@"hook_%@_%@.txt", self.record.type, [tf stringFromDate:self.record.date]];
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:fn];
+    [txt writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
     UIActivityViewController *av = [[UIActivityViewController alloc]
-        initWithActivityItems:@[s] applicationActivities:nil];
+        initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];
+    if (av.popoverPresentationController) {
+        av.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    }
     [self presentViewController:av animated:YES completion:nil];
+}
+
+/// 单条记录 -> 可读 txt
+- (NSString *)buildSingleText {
+    NSDateFormatter *df = [NSDateFormatter new];
+    df.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+    NSMutableString *s = [NSMutableString string];
+    NSDictionary *r = self.record.raw;
+
+    [s appendString:@"========================================\n"];
+    [s appendFormat:@"  %@  (%@)\n", self.record.title, self.record.layer];
+    [s appendString:@"========================================\n\n"];
+    [s appendFormat:@"记录类型 : %@\n", self.record.type];
+    NSString *op = [self.record opTag], *alg = [self.record algoTag];
+    if (op.length)   [s appendFormat:@"操作     : %@\n", op];
+    if (alg.length)  [s appendFormat:@"算法     : %@\n", alg];
+    [s appendFormat:@"时间     : %@\n", [df stringFromDate:self.record.date]];
+    if (self.record.count > 1) [s appendFormat:@"出现次数 : ×%ld\n", (long)self.record.count];
+    [s appendString:@"\n"];
+
+    NSArray *order = @[@"key", @"iv", @"text", @"inText", @"in", @"inLen",
+                       @"outText", @"out", @"outLen", @"mac", @"hash", @"data",
+                       @"url", @"method", @"status", @"reqText", @"req",
+                       @"respText", @"resp", @"error", @"src", @"caller"];
+    NSDictionary *names = @{
+        @"key":@"KEY", @"iv":@"IV", @"text":@"明文", @"inText":@"明文",
+        @"in":@"密文/输入", @"inLen":@"输入长度", @"outText":@"解密结果",
+        @"out":@"输出", @"outLen":@"输出长度", @"mac":@"HMAC", @"hash":@"HASH",
+        @"data":@"数据", @"url":@"URL", @"method":@"方法", @"status":@"状态码",
+        @"reqText":@"请求体", @"req":@"请求体", @"respText":@"响应体",
+        @"resp":@"响应体", @"error":@"错误", @"src":@"来源", @"caller":@"调用者"
+    };
+    for (NSString *k in order) {
+        id v = r[k];
+        if (!v) continue;
+        NSString *sv = [v isKindOfClass:[NSString class]] ? v : [v description];
+        if (sv.length == 0) continue;
+        [s appendFormat:@"%-9s: %@\n", [names[k] UTF8String], sv];
+    }
+
+    // 复算结果
+    NSString *vr = [self recompute];
+    if (vr.length) {
+        [s appendString:@"\n─── 本地复算 ───\n"];
+        [s appendFormat:@"%@\n", vr];
+    }
+
+    // 调用栈
+    NSArray *bt = r[@"bt"];
+    if ([bt isKindOfClass:[NSArray class]] && bt.count) {
+        [s appendString:@"\n─── 调用栈 ───\n"];
+        for (NSInteger i = 0; i < (NSInteger)bt.count; i++)
+            [s appendFormat:@"%2ld  %@\n", (long)i, bt[i]];
+    }
+
+    // 原始 JSON
+    NSData *jd = [NSJSONSerialization dataWithJSONObject:r options:NSJSONWritingPrettyPrinted error:nil];
+    if (jd) {
+        [s appendString:@"\n─── 原始 JSON ───\n"];
+        [s appendString:[[NSString alloc] initWithData:jd encoding:NSUTF8StringEncoding] ?: @""];
+        [s appendString:@"\n"];
+    }
+    [s appendString:@"\n—— 由 AzbcpxTuT 导出 ——\n"];
+    return s;
 }
 
 @end
