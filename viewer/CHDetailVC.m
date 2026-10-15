@@ -993,6 +993,7 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
     // 子项 / 单条 -> 进详情
     CHRecordDetailVC *d = [CHRecordDetailVC new];
     d.record = r;
+    d.app = self.app;          // ★ 传过去，用于定位沙盒
     [self.navigationController pushViewController:d animated:YES];
 }
 
