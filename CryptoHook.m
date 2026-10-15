@@ -139,7 +139,8 @@ static void logJSON(NSDictionary *rec) {
         if (j) {
             fwrite(j.bytes, 1, j.length, gFp);
             fputc('\n', gFp);
-            // ★ 不每次 fflush（高频刷盘会卡死）；由定时器每 2 秒刷一次
+            // ★ 每条都刷盘（之前省掉这步导致日志文件全空）
+            fflush(gFp);
             gBytes += j.length + 1;
         }
     }
@@ -499,26 +500,30 @@ DYLD_INTERPOSE(my_SecKeyCreateDecryptedData, SecKeyCreateDecryptedData)
 // ============================================================
 // L2：明文字符串（明文的必经之路）★ 核心
 // ============================================================
-static BOOL looksInteresting(NSString *s) {
-    if (s.length < 4) return NO;
-    if (s.length > 4096) return NO;
-    static NSArray *kw = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        kw = @[@"http", @"://", @".cn", @".com", @".net", @".io", @".site",
-               @"api", @"key", @"token", @"session", @"nonce", @"sig",
-               @"enc", @"dec", @"seal", @"aad", @"secret", @"auth",
-               @"{", @"}", @"card", @"device", @"expire", @"license",
-               @"|", @"MD5", @"SHA", @"RC4", @"AES", @"RSA", @"HMAC"];
-    });
-    for (NSString *k in kw) if ([s rangeOfString:k].location != NSNotFound) return YES;
-    return NO;
-}
+// ★ 性能关键：C 层关键词表（strstr 比 rangeOfString: 快得多）
+static const char *kStrKw[] = {
+    "http", "://", ".com", ".cn", ".net", "api", "token", "session",
+    "nonce", "sign", "encrypt", "decrypt", "secret", "auth", "card",
+    "device", "expire", "licen", "MD5", "SHA", "RC4", "AES", "RSA", "HMAC", NULL
+};
 
 static void recordString(const char *tag, NSString *s) {
-    if (!s || !looksInteresting(s)) return;
+    if (!s) return;
+    // ① 先看开关（最便宜）
     if (!cfgOn(@"L2")) return;
+    // ② 长度快筛
+    NSUInteger len = s.length;
+    if (len < 6 || len > 4096) return;
+    // ③ 采样门（先挡住大部分，避免后面的开销）
     if (!rateGate("str", cfgRate())) return;
+    // ④ 最后才做关键词（C 层 strstr）
+    const char *cs = s.UTF8String;
+    if (!cs) return;
+    BOOL hit = NO;
+    for (int i = 0; kStrKw[i]; i++) {
+        if (strstr(cs, kStrKw[i])) { hit = YES; break; }
+    }
+    if (!hit) return;
     NSMutableDictionary *d = base(@"L2", @"String");
     d[@"src"] = @(tag);
     d[@"text"] = s.length > 512 ? [s substringToIndex:512] : s;
@@ -527,10 +532,28 @@ static void recordString(const char *tag, NSString *s) {
     emit(d);
 }
 
+// ★ L2 开关缓存（避免每次字符串创建都读配置）
+static BOOL     gL2On = YES;
+static uint64_t gL2Tick = 0;
+
+static inline BOOL l2EnabledFast(void) {
+    uint64_t now = mach_absolute_time();
+    if (gTickScale == 0) {
+        mach_timebase_info_data_t tb; mach_timebase_info(&tb);
+        gTickScale = (double)tb.numer / tb.denom / 1e9;
+    }
+    if ((now - gL2Tick) * gTickScale > 2.0) {   // 每 2 秒刷新
+        gL2On = cfgOn(@"L2");
+        gL2Tick = now;
+    }
+    return gL2On;
+}
+
 static NSString * (*o_stringWithUTF8String)(id, SEL, const char *);
 static NSString * my_stringWithUTF8String(id self, SEL _cmd, const char *s) {
     NSString *r = o_stringWithUTF8String(self, _cmd, s);
-    if (s) recordString("+[NSString stringWithUTF8String:]", r);
+    // ★ 快速门：先看缓存开关（几个指令），再决定要不要做后续检查
+    if (s && l2EnabledFast()) recordString("+[NSString stringWithUTF8String:]", r);
     return r;
 }
 
