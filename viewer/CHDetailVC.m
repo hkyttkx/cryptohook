@@ -354,10 +354,12 @@
         [self.empty.widthAnchor constraintEqualToConstant:290],
     ]];
 
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"]
-                style:UIBarButtonItemStylePlain target:self action:@selector(exportAll)];
-    self.navigationItem.rightBarButtonItem.tintColor = CH_ACCENT;
+    // ★ 右上角「更多」：分享 / 清空本 App
+    UIBarButtonItem *more = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
+                style:UIBarButtonItemStylePlain target:self action:@selector(showMore)];
+    more.tintColor = CH_ACCENT;
+    self.navigationItem.rightBarButtonItem = more;
 
     [self load];
 }
@@ -423,6 +425,41 @@
     });
 }
 
+- (void)showMore {
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:nil
+        message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [al addAction:[UIAlertAction actionWithTitle:@"分享全部记录"
+                          style:UIAlertActionStyleDefault
+                        handler:^(UIAlertAction *a){ [self exportAll]; }]];
+    [al addAction:[UIAlertAction actionWithTitle:@"清空这个 App 的记录"
+                          style:UIAlertActionStyleDestructive
+                        handler:^(UIAlertAction *a){ [self confirmClearApp]; }]];
+    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if (al.popoverPresentationController) {
+        al.popoverPresentationController.sourceView = self.view;
+        al.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width - 30, 40, 1, 1);
+    }
+    [self presentViewController:al animated:YES completion:nil];
+}
+
+- (void)confirmClearApp {
+    NSInteger total = self.allRecords.count;
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"清空记录"
+        message:[NSString stringWithFormat:@"删除 %@ 的全部 %ld 条记录？不可恢复。",
+                 self.app.name ?: @"该 App", (long)total]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [al addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *a){
+        NSInteger n = [CHScanner clearApp:self.app];
+        self.allRecords = @[]; self.records = @[];
+        self.empty.hidden = NO;
+        [self.table reloadData];
+        NSLog(@"[CryptoViewer] 清空 %ld 个日志文件", (long)n);
+    }]];
+    [self presentViewController:al animated:YES completion:nil];
+}
+
 - (void)exportAll {
     NSMutableString *s = [NSMutableString string];
     for (CHRecord *r in self.records)
@@ -446,10 +483,46 @@
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [t deselectRowAtIndexPath:ip animated:YES];
     CHRecord *r = self.records[ip.row];
-    // push 全屏详情（大内容也能看全 / 复制 / 分享）
     CHRecordDetailVC *d = [CHRecordDetailVC new];
     d.record = r;
     [self.navigationController pushViewController:d animated:YES];
+}
+
+#pragma mark - 删除
+- (BOOL)tableView:(UITableView *)t canEditRowAtIndexPath:(NSIndexPath *)ip { return YES; }
+
+- (void)tableView:(UITableView *)t
+    commitEditingStyle:(UITableViewCellEditingStyle)style
+     forRowAtIndexPath:(NSIndexPath *)ip {
+    if (style != UITableViewCellEditingStyleDelete) return;
+    CHRecord *r = self.records[ip.row];
+    NSInteger n = [CHScanner deleteRecords:@[r]];
+    // 本地同步移除
+    NSMutableArray *arr = [self.records mutableCopy];
+    [arr removeObjectAtIndex:ip.row];
+    self.records = arr;
+    NSMutableArray *all = [self.allRecords mutableCopy];
+    [all removeObject:r];
+    self.allRecords = all;
+    [t deleteRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationFade];
+    NSLog(@"[CryptoViewer] 删除记录 %ld 条(含聚合)", (long)n);
+}
+
+// 右键菜单也提供删除
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)t
+    trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
+    CHRecord *r = self.records[ip.row];
+    UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
+        title:@"删除" handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+        [CHScanner deleteRecords:@[r]];
+        NSMutableArray *arr = [self.records mutableCopy];
+        [arr removeObjectAtIndex:ip.row];
+        self.records = arr;
+        [t deleteRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationFade];
+        done(YES);
+    }];
+    del.backgroundColor = CH_RED;
+    return [UISwipeActionsConfiguration configurationWithActions:@[del]];
 }
 
 @end
