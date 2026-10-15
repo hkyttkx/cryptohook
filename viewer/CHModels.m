@@ -1,5 +1,6 @@
 // CHModels.m
 #import "CHModels.h"
+#include <CommonCrypto/CommonCrypto.h>
 
 @implementation CHApp
 
