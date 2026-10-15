@@ -224,7 +224,8 @@
                          [[a.bid  lowercaseString] containsString:[kw lowercaseString]];
                 if (!m) continue;
             }
-            (a.recordCount > 0 ? h : o).addObject:a;
+            NSMutableArray *dest = (a.recordCount > 0) ? h : o;
+            [dest addObject:a];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             self.hooked = h; self.others = o;
