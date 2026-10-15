@@ -208,8 +208,75 @@ static NSMutableDictionary *base(NSString *layer, NSString *type) {
     }
     return d;
 }
+// ★ 黑名单过滤（由 App 写入 config.plist，可加可删）
+//   excludeTypes   : 按 type 精确匹配        ["HTTP.response", "CCCrypt", ...]
+//   excludeUrls    : URL 包含即丢（子串）     ["data-track.yingxiong.com", ...]
+//   excludeCallers : 调用点包含即丢           ["DSOverlay_PresentFrame", ...]
+//   excludeKeywords: 任意字段包含即丢         ["analytics", ...]
+static BOOL cfgExcluded(NSDictionary *rec) {
+    cfgRefresh();
+    if (gCfg.count == 0) return NO;
+
+    // 1) type 精确
+    NSArray *types = gCfg[@"excludeTypes"];
+    if ([types isKindOfClass:[NSArray class]] && types.count) {
+        NSString *t = rec[@"type"];
+        if (t && [types containsObject:t]) { gDropCount++; return YES; }
+    }
+    // 2) URL 子串
+    NSArray *urls = gCfg[@"excludeUrls"];
+    if ([urls isKindOfClass:[NSArray class]] && urls.count) {
+        NSString *u = rec[@"url"];
+        if ([u isKindOfClass:[NSString class]] && u.length) {
+            for (NSString *p in urls) {
+                if (![p isKindOfClass:[NSString class]] || p.length == 0) continue;
+                if ([u rangeOfString:p options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    gDropCount++; return YES;
+                }
+            }
+        }
+    }
+    // 3) 调用点子串
+    NSArray *callers = gCfg[@"excludeCallers"];
+    if ([callers isKindOfClass:[NSArray class]] && callers.count) {
+        NSString *c = rec[@"caller"];
+        NSArray *bt = rec[@"bt"];
+        if ([c isKindOfClass:[NSString class]] && c.length) {
+            for (NSString *p in callers) {
+                if (![p isKindOfClass:[NSString class]] || p.length == 0) continue;
+                if ([c rangeOfString:p options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    gDropCount++; return YES;
+                }
+                if ([bt isKindOfClass:[NSArray class]]) {
+                    for (NSString *f in bt)
+                        if ([f rangeOfString:p options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                            gDropCount++; return YES;
+                        }
+                }
+            }
+        }
+    }
+    // 4) 关键词（任意字段）
+    NSArray *kws = gCfg[@"excludeKeywords"];
+    if ([kws isKindOfClass:[NSArray class]] && kws.count) {
+        NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@",
+                         rec[@"type"] ?: @"", rec[@"url"] ?: @"", rec[@"text"] ?: @"",
+                         rec[@"inText"] ?: @"", rec[@"caller"] ?: @"", rec[@"src"] ?: @""];
+        if (hay.length) {
+            for (NSString *kw in kws) {
+                if (![kw isKindOfClass:[NSString class]] || kw.length == 0) continue;
+                if ([hay rangeOfString:kw options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    gDropCount++; return YES;
+                }
+            }
+        }
+    }
+    return NO;
+}
+
 static void emit(NSMutableDictionary *rec) {
     @try {
+        if (cfgExcluded(rec)) return;   // ★ 命中过滤规则，直接丢
         logJSON(rec);
         // ★ 不再 NSLog（写系统日志很慢，改成配置开关）
         cfgRefresh();
