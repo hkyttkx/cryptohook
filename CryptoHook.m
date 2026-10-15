@@ -497,6 +497,110 @@ static CFDataRef my_SecKeyCreateDecryptedData(SecKeyRef key, SecKeyAlgorithm alg
 }
 DYLD_INTERPOSE(my_SecKeyCreateDecryptedData, SecKeyCreateDecryptedData)
 
+// ===== 老 API：SecKeyEncrypt / SecKeyDecrypt（RSA 常用）=====
+static OSStatus my_SecKeyEncrypt(SecKeyRef key, SecPadding pad,
+    const uint8_t *plain, size_t plainLen, uint8_t *cipher, size_t *cipherLen) {
+    if (cfgOn(@"L1") && rateGate("SecKeyEnc", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyEncrypt");
+        d[@"alg"] = [NSString stringWithFormat:@"RSA/pad%u", pad];
+        d[@"inLen"] = @(plainLen);
+        d[@"in"] = hexStr(plain, plainLen, 4096);
+        NSString *t = tryUTF8(plain, plainLen); if (t) d[@"inText"] = t;
+        emit(d);
+    }
+    OSStatus r = SecKeyEncrypt(key, pad, plain, plainLen, cipher, cipherLen);
+    if (cfgOn(@"L1") && cipher && cipherLen && rateGate("SecKeyEncOut", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyEncrypt.out");
+        d[@"outLen"] = @(*cipherLen);
+        d[@"out"] = hexStr(cipher, *cipherLen, 4096);
+        emit(d);
+    }
+    return r;
+}
+DYLD_INTERPOSE(my_SecKeyEncrypt, SecKeyEncrypt)
+
+static OSStatus my_SecKeyDecrypt(SecKeyRef key, SecPadding pad,
+    const uint8_t *cipher, size_t cipherLen, uint8_t *plain, size_t *plainLen) {
+    if (cfgOn(@"L1") && rateGate("SecKeyDec", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyDecrypt");
+        d[@"alg"] = [NSString stringWithFormat:@"RSA/pad%u", pad];
+        d[@"inLen"] = @(cipherLen);
+        d[@"in"] = hexStr(cipher, cipherLen, 4096);
+        emit(d);
+    }
+    OSStatus r = SecKeyDecrypt(key, pad, cipher, cipherLen, plain, plainLen);
+    if (cfgOn(@"L1") && plain && plainLen && rateGate("SecKeyDecOut", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyDecrypt.out");
+        d[@"outLen"] = @(*plainLen);
+        d[@"out"] = hexStr(plain, *plainLen, 4096);
+        NSString *t = tryUTF8(plain, *plainLen); if (t) d[@"outText"] = t;
+        emit(d);
+    }
+    return r;
+}
+DYLD_INTERPOSE(my_SecKeyDecrypt, SecKeyDecrypt)
+
+// ===== 签名 / 验签 =====
+static Boolean my_SecKeyVerifySignature(SecKeyRef key, SecKeyAlgorithm alg,
+    CFDataRef signedData, CFDataRef sig, CFErrorRef *err) {
+    if (cfgOn(@"L1") && rateGate("SecVerify", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"SecKeyVerifySignature");
+        d[@"alg"] = (__bridge id)alg ?: @"?";
+        d[@"inLen"] = @(CFDataGetLength(signedData));
+        d[@"in"] = hexStr(CFDataGetBytePtr(signedData), CFDataGetLength(signedData), 4096);
+        d[@"sig"] = hexStr(CFDataGetBytePtr(sig), CFDataGetLength(sig), 512);
+        emit(d);
+    }
+    return SecKeyVerifySignature(key, alg, signedData, sig, err);
+}
+DYLD_INTERPOSE(my_SecKeyVerifySignature, SecKeyVerifySignature)
+
+// ===== 摘要：MD5 / SHA1 / SHA512 / CCDigest =====
+static void my_CC_MD5(const void *data, CC_LONG len, unsigned char *md) {
+    if (cfgOn(@"L1") && rateGate("MD5", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CC_MD5");
+        d[@"inLen"] = @(len);
+        d[@"in"] = hexStr(data, len, 4096);
+        NSString *t = tryUTF8(data, len); if (t) d[@"inText"] = t;
+        CC_MD5(data, len, md);
+        if (md) d[@"hash"] = hexStr(md, 16, 16);
+        emit(d);
+        return;
+    }
+    CC_MD5(data, len, md);
+}
+DYLD_INTERPOSE(my_CC_MD5, CC_MD5)
+
+static void my_CC_SHA1(const void *data, CC_LONG len, unsigned char *md) {
+    if (cfgOn(@"L1") && rateGate("SHA1", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CC_SHA1");
+        d[@"inLen"] = @(len);
+        d[@"in"] = hexStr(data, len, 4096);
+        NSString *t = tryUTF8(data, len); if (t) d[@"inText"] = t;
+        CC_SHA1(data, len, md);
+        if (md) d[@"hash"] = hexStr(md, 20, 20);
+        emit(d);
+        return;
+    }
+    CC_SHA1(data, len, md);
+}
+DYLD_INTERPOSE(my_CC_SHA1, CC_SHA1)
+
+static void my_CC_SHA512(const void *data, CC_LONG len, unsigned char *md) {
+    if (cfgOn(@"L1") && rateGate("SHA512", cfgRate())) {
+        NSMutableDictionary *d = base(@"L1", @"CC_SHA512");
+        d[@"inLen"] = @(len);
+        d[@"in"] = hexStr(data, len, 4096);
+        CC_SHA512(data, len, md);
+        if (md) d[@"hash"] = hexStr(md, 64, 64);
+        emit(d);
+        return;
+    }
+    CC_SHA512(data, len, md);
+}
+DYLD_INTERPOSE(my_CC_SHA512, CC_SHA512)
+
+
 // ============================================================
 // L2：明文字符串（明文的必经之路）★ 核心
 // ============================================================
