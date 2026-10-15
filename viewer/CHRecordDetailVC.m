@@ -1,6 +1,7 @@
 // CHRecordDetailVC.m — 详情：分组 + 排序 + hex/ASCII 双显
 #import "CHRecordDetailVC.h"
 #import "CHTheme.h"
+#include <CommonCrypto/CommonCrypto.h>
 
 #pragma mark - 工具：hex -> ASCII
 // ── 编码转换工具 ──
@@ -348,6 +349,15 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         [stack addObject:[[CHFieldView alloc] initWithName:@"时间列表" value:s color:CH_PURPLE]];
     }
 
+    // ── ⑦ 本地复算 ──
+    NSString *vr = [self recompute];
+    if (vr.length) {
+        addRaw(makeSectionHeader(@"本地复算", CH_ACCENT));
+        BOOL ok = [vr hasPrefix:@"✓"];
+        [stack addObject:[[CHFieldView alloc] initWithName:(ok ? @"验证结果" : @"验证结果")
+                                value:vr color:(ok ? CH_ACCENT : CH_RED)]];
+    }
+
     // ── ⑦ 原始记录 ──
     addRaw(makeSectionHeader(@"原始记录", CH_SUB));
     NSData *jd = [NSJSONSerialization dataWithJSONObject:r
@@ -368,6 +378,69 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         prev = v;
     }
     if (prev) [prev.bottomAnchor constraintEqualToAnchor:self.scroll.bottomAnchor constant:-40].active = YES;
+}
+
+#pragma mark - 本地复算验证
+/// 用记录里的 KEY/IV 自己跑一遍，跟记录结果比对
+- (NSString *)recompute {
+    NSDictionary *r = self.record.raw;
+    NSData *inD  = hexToData(r[@"in"]);
+    NSData *keyD = hexToData(r[@"key"]);
+    NSData *ivD  = hexToData(r[@"iv"]);
+    NSData *outD = hexToData(r[@"out"]);
+    if (!inD.length || !keyD.length) return nil;
+
+    NSNumber *algN = r[@"alg"], *optN = r[@"opt"], *opN = r[@"op"];
+    CCAlgorithm alg = algN ? (CCAlgorithm)algN.intValue : kCCAlgorithmAES;
+    CCOptions   opt = optN ? (CCOptions)optN.intValue   : 0;
+    BOOL isEnc = [opN isEqual:@"ENC"];
+    CCOperation op = isEnc ? kCCEncrypt : kCCDecrypt;
+
+    size_t cap = inD.length + 64;
+    void *buf = calloc(1, cap);
+    if (!buf) return nil;
+    size_t moved = 0;
+    CCCryptorStatus st = CCCrypt(op, alg, opt,
+                                 keyD.bytes, keyD.length,
+                                 ivD.length ? ivD.bytes : NULL,
+                                 inD.bytes, inD.length,
+                                 buf, cap, &moved);
+    if (st != kCCSuccess) {
+        free(buf);
+        NSArray *errs = @[@"参数错误", @"缓冲区不足", @"对齐错误",
+                          @"解码失败", @"解码失败", @"内存不足", @"参数错误"];
+        NSString *en = (st >= 0 && st < (CCCryptorStatus)errs.count) ? errs[st] : @"未知";
+        return [NSString stringWithFormat:@"✗ 复算失败 (code %d · %@)", (int)st, en];
+    }
+    NSData *out = [NSData dataWithBytes:buf length:moved];
+    free(buf);
+
+    NSMutableString *msg = [NSMutableString string];
+    NSString *dir = isEnc ? @"加密" : @"解密";
+    [msg appendFormat:@"%@ %lu 字节 → %lu 字节\n\n", dir,
+                     (unsigned long)inD.length, (unsigned long)out.length];
+    if (outD.length) {
+        if ([out isEqualToData:outD]) {
+            [msg appendFormat:@"✓ 复算通过\n用记录中的 KEY/IV %@一遍，结果与记录的输出完全一致。\n\n复算结果(HEX):\n%@",
+                             dir, [out base64EncodedStringWithOptions:0] ? [self hexOf:out] : @""];
+        } else {
+            [msg appendFormat:@"✗ 不一致\n复算得到 %lu 字节，与记录中的输出不同。\n可能原因：分组不对 / KEY/IV 来自别的调用 / 记录被截断。\n\n复算(HEX):\n%@\n\n记录(HEX):\n%@",
+                             (unsigned long)out.length, [self hexOf:out], [self hexOf:outD]];
+        }
+    } else {
+        [msg appendFormat:@"（记录中没有输出可比对，下面是复算结果）\n\n%@", [self hexOf:out]];
+    }
+    return msg;
+}
+
+- (NSString *)hexOf:(NSData *)d {
+    if (!d.length) return @"(空)";
+    NSMutableString *o = [NSMutableString stringWithCapacity:d.length * 2];
+    const uint8_t *b = d.bytes;
+    NSUInteger lim = MIN(d.length, 512);
+    for (NSUInteger i = 0; i < lim; i++) [o appendFormat:@"%02x", b[i]];
+    if (d.length > lim) [o appendFormat:@"…(%luB)", (unsigned long)d.length];
+    return o;
 }
 
 - (void)shareAll {
