@@ -23,40 +23,63 @@
 #include <mach/mach_time.h>
 
 // ============================================================
-// 配置（由 CryptoViewer 写入，dylib 启动时读）
+// 配置（由 CryptoViewer 写入；dylib 优先读【自己沙盒】，其次共享目录）
 // ============================================================
 static NSDictionary *gCfg = nil;
-static NSDate *gCfgTime = nil;
+static uint64_t gCfgTick = 0;
+static double   gTickScale = 0;
+static BOOL     gSlowStack = NO;
 
-#define CFG_PATH @"/var/mobile/Library/CryptoHook/config.plist"
+static NSArray<NSString *> *cfgPaths(void) {
+    NSMutableArray *a = [NSMutableArray array];
+    // ★ 1) 自己沙盒 —— TrollStore 注入的 App 一定能读写这里
+    NSString *home = NSHomeDirectory();
+    if (home) {
+        [a addObject:[home stringByAppendingPathComponent:@"Documents/CryptoHook/config.plist"]];
+        [a addObject:[home stringByAppendingPathComponent:@"Library/Caches/CryptoHook/config.plist"]];
+    }
+    // 2) 共享目录（若 App 恰好有权限）
+    [a addObject:@"/var/mobile/Library/CryptoHook/config.plist"];
+    [a addObject:@"/tmp/CryptoHook/config.plist"];
+    return a;
+}
 
 static void cfgRefresh(void) {
+    uint64_t now = mach_absolute_time();
+    if (gTickScale == 0) {
+        mach_timebase_info_data_t tb; mach_timebase_info(&tb);
+        gTickScale = (double)tb.numer / tb.denom / 1e9;
+    }
+    // 每 3 秒最多重读一次
+    if (gCfg && (now - gCfgTick) * gTickScale < 3.0) return;
+    gCfgTick = now;
     @try {
-        // 最多每 5 秒重读一次，允许 App 里改完立刻生效
-        if (gCfg && gCfgTime && -[gCfgTime timeIntervalSinceNow] < 5.0) return;
-        NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:CFG_PATH];
-        gCfg = (d && [d isKindOfClass:[NSDictionary class]]) ? d : @{};
-        gCfgTime = [NSDate date];
+        for (NSString *p in cfgPaths()) {
+            NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:p];
+            if (d && [d isKindOfClass:[NSDictionary class]] && d.count) {
+                gCfg = d;
+                return;
+            }
+        }
+        gCfg = @{};
     } @catch (NSException *e) {
-        gCfg = @{}; gCfgTime = [NSDate date];
+        gCfg = @{};
     }
 }
-static BOOL gSlowStack = NO;   // 是否采集完整调用栈（很慢，默认关）
 
 static BOOL cfgOn(NSString *key) {
     cfgRefresh();
     gSlowStack = [gCfg[@"slowStack"] boolValue];
     NSNumber *v = gCfg[key];
     if (v) return v.boolValue;
-    // ★ 默认值：L1（系统加密）默认【关】—— 它频率最高，是卡死主因
-    //          L2（明文）/ L3（网络）默认开 —— 信息价值高、频率低
+    // 默认：L1（系统加密，频率最高）默认关；其余默认开
     if ([key isEqualToString:@"L1"]) return NO;
     return YES;
 }
 static int cfgRate(void) {
     cfgRefresh();
     NSNumber *v = gCfg[@"rate"];
-    return v ? v.intValue : 50;   // 默认 50 条/秒（原来 200 太高）
+    return v ? v.intValue : 50;
 }
 
 // ============================================================
