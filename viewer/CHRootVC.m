@@ -193,6 +193,8 @@
     self.table.delegate = self;
     self.table.backgroundColor = [UIColor clearColor];
     self.table.separatorStyle = UITableViewCellSeparatorStyleNone;
+    self.table.sectionHeadersPinToVisibleBounds = YES;   // ★ 分组标题吸顶
+    if (@available(iOS 15.0, *)) self.table.sectionHeaderTopPadding = 0;
     self.table.rowHeight = 74;
     self.table.contentInset = UIEdgeInsetsMake(8, 0, 40, 0);
     self.table.translatesAutoresizingMaskIntoConstraints = NO;
@@ -272,9 +274,15 @@
 
     static NSString *hid = @"hdr";
     UITableViewHeaderFooterView *v = [t dequeueReusableHeaderFooterViewWithIdentifier:hid];
-    if (!v) v = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:hid];
-    v.contentView.backgroundColor = CH_BG;   // 不透明，滚动时内容不会透上来
-    v.backgroundView = nil;
+    if (!v) {
+        v = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:hid];
+        // ★ 不透明背景（滚动时下面的内容不会透上来）
+        UIView *bg = [UIView new];
+        bg.backgroundColor = CH_BG;
+        v.backgroundView = bg;
+        v.contentView.backgroundColor = [UIColor clearColor];
+    }
+    v.backgroundView.backgroundColor = CH_BG;
 
     UILabel *l = [v.contentView viewWithTag:991];
     if (!l) {
