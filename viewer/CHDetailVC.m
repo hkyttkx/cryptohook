@@ -273,6 +273,126 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 
 @end
 
+#pragma mark - 子项 Cell（紧凑一行，可点进详情）
+@interface CHDupCell : UITableViewCell
+@property (nonatomic, strong) UIView *card;
+@property (nonatomic, strong) UIView *bar;
+@property (nonatomic, strong) UILabel *timeL;
+@property (nonatomic, strong) UILabel *tagL;
+@property (nonatomic, strong) UILabel *sumL;
+@property (nonatomic, strong) UIImageView *arrow;
+@end
+
+@implementation CHDupCell
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid {
+    self = [super initWithStyle:style reuseIdentifier:rid];
+    if (self) {
+        self.backgroundColor = [UIColor clearColor];
+        self.contentView.backgroundColor = [UIColor clearColor];
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+
+        _card = [UIView new];
+        _card.backgroundColor = CH_BG2;
+        _card.layer.cornerRadius = 8;
+        _card.layer.cornerCurve = kCACornerCurveContinuous;
+        _card.layer.borderWidth = 1.0 / [UIScreen mainScreen].scale;
+        _card.layer.borderColor = CH_LINE.CGColor;
+        _card.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:_card];
+
+        _bar = [UIView new];
+        _bar.layer.cornerRadius = 1;
+        _bar.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_bar];
+
+        _timeL = [UILabel new];
+        _timeL.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_timeL];
+
+        _tagL = [UILabel new];
+        _tagL.textAlignment = NSTextAlignmentCenter;
+        _tagL.layer.cornerRadius = 3;
+        _tagL.layer.borderWidth = 1.0 / [UIScreen mainScreen].scale;
+        _tagL.clipsToBounds = YES;
+        _tagL.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_tagL];
+
+        _sumL = [UILabel new];
+        _sumL.numberOfLines = 1;
+        _sumL.lineBreakMode = NSLineBreakByTruncatingTail;
+        _sumL.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_sumL];
+
+        _arrow = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+        _arrow.tintColor = CH_SUB;
+        _arrow.contentMode = UIViewContentModeScaleAspectFit;
+        _arrow.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_arrow];
+
+        [NSLayoutConstraint activateConstraints:@[
+            // 左侧缩进 34（表示是从属关系）
+            [_card.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:34],
+            [_card.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14],
+            [_card.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:2],
+            [_card.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-2],
+
+            [_bar.leadingAnchor constraintEqualToAnchor:_card.leadingAnchor constant:0],
+            [_bar.topAnchor constraintEqualToAnchor:_card.topAnchor constant:7],
+            [_bar.bottomAnchor constraintEqualToAnchor:_card.bottomAnchor constant:-7],
+            [_bar.widthAnchor constraintEqualToConstant:2],
+
+            [_timeL.leadingAnchor constraintEqualToAnchor:_bar.trailingAnchor constant:9],
+            [_timeL.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
+            [_timeL.widthAnchor constraintEqualToConstant:78],
+
+            [_tagL.leadingAnchor constraintEqualToAnchor:_timeL.trailingAnchor constant:4],
+            [_tagL.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
+            [_tagL.heightAnchor constraintEqualToConstant:13],
+            [_tagL.widthAnchor constraintGreaterThanOrEqualToConstant:34],
+
+            [_sumL.leadingAnchor constraintEqualToAnchor:_tagL.trailingAnchor constant:6],
+            [_sumL.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
+            [_sumL.trailingAnchor constraintLessThanOrEqualToAnchor:_arrow.leadingAnchor constant:-6],
+
+            [_arrow.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor constant:-8],
+            [_arrow.centerYAnchor constraintEqualToAnchor:_card.centerYAnchor],
+            [_arrow.widthAnchor constraintEqualToConstant:10],
+            [_arrow.heightAnchor constraintEqualToConstant:10],
+        ]];
+    }
+    return self;
+}
+
+- (void)configWith:(CHRecord *)r idx:(NSInteger)idx color:(UIColor *)col {
+    UIColor *c = col ?: CH_SUB;
+    self.bar.backgroundColor = c;
+    self.bar.layer.shadowOpacity = 0;
+
+    static NSDateFormatter *tf = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        tf = [NSDateFormatter new];
+        tf.dateFormat = @"HH:mm:ss.SSS";
+    });
+    self.timeL.attributedText = [CHTheme tracked:[tf stringFromDate:r.date]
+        font:[CHTheme mono:9.5 weight:UIFontWeightRegular] color:CH_SUB spacing:0.1];
+
+    NSString *op = [r opTag] ?: r.layer;
+    self.tagL.attributedText = [CHTheme tracked:op
+        font:[CHTheme mono:8 weight:UIFontWeightBold] color:c spacing:0.3];
+    self.tagL.layer.borderColor = [c colorWithAlphaComponent:0.45].CGColor;
+    self.tagL.backgroundColor = [c colorWithAlphaComponent:0.12];
+
+    NSString *sum = r.subtitle ?: @"";
+    if (sum.length > 60) sum = [[sum substringToIndex:60] stringByAppendingString:@"…"];
+    self.sumL.attributedText = [CHTheme tracked:sum
+        font:[CHTheme mono:9.5 weight:UIFontWeightRegular] color:CH_TEXT2 spacing:0.0];
+
+    self.arrow.tintColor = [c colorWithAlphaComponent:0.7];
+}
+
+@end
+
 #pragma mark - VC
 @interface CHDetailVC () <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
 @property (nonatomic, strong) UITableView *table;
@@ -575,8 +695,12 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
         [self.rowIsDup addObject:@NO];
         [self.rowDupIdx addObject:@(-1)];
         if (r.count > 1 && [self.expandedKeys containsObject:r.dedupKey]) {
+            // ★ 子项按时间正序（早 -> 晚）
+            NSArray *sortedDups = [r.dups sortedArrayUsingComparator:^NSComparisonResult(CHRecord *a, CHRecord *b) {
+                return a.t < b.t ? NSOrderedAscending : (a.t > b.t ? NSOrderedDescending : NSOrderedSame);
+            }];
             NSInteger i = 0;
-            for (CHRecord *d in r.dups) {
+            for (CHRecord *d in sortedDups) {
                 [self.rows addObject:d];
                 [self.rowIsDup addObject:@YES];
                 [self.rowDupIdx addObject:@(i++)];
@@ -818,21 +942,28 @@ static NSAttributedString *chHighlight(NSString *text, NSString *kw,
 #pragma mark - Table
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return self.rows.count; }
 
+- (CGFloat)tableView:(UITableView *)t heightForRowAtIndexPath:(NSIndexPath *)ip {
+    if ([self rowIsDupAt:ip]) return 46;   // ★ 子项紧凑固定高
+    return UITableViewAutomaticDimension;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
     static NSString *cid = @"rec";
     CHRecCell *c = [t dequeueReusableCellWithIdentifier:cid];
     if (!c) c = [[CHRecCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cid];
     CHRecord *rec = [self rowRecord:ip];
-    BOOL dup = [self rowIsDupAt:ip];
-    [c configWith:rec keyword:self.keyword];
-    // 子项：缩进 + 变暗
-    if (dup) {
-        c.leadingShift = 1;
-        c.alphaDim = YES;
-    } else {
-        c.leadingShift = 0;
-        c.alphaDim = NO;
+    if ([self rowIsDupAt:ip]) {
+        // ★ 子项走独立紧凑 cell
+        static NSString *did = @"dup";
+        CHDupCell *dc = [t dequeueReusableCellWithIdentifier:did];
+        if (!dc) dc = [[CHDupCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:did];
+        NSInteger di = (ip.row < (NSInteger)self.rowDupIdx.count) ? [self.rowDupIdx[ip.row] integerValue] : 0;
+        [dc configWith:rec idx:di color:[CHTheme colorForLayer:rec.layer]];
+        return dc;
     }
+    [c configWith:rec keyword:self.keyword];
+    c.leadingShift = 0;
+    c.alphaDim = NO;
     return c;
 }
 
