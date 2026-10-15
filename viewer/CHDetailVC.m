@@ -19,6 +19,7 @@
 @property (nonatomic, strong) UILabel     *tagL;      // LAYER 标签
 @property (nonatomic, strong) UILabel     *algoL;     // 算法标签
 @property (nonatomic, strong) UILabel     *titleL;
+@property (nonatomic, strong) UILabel     *countL;    // ×N 角标
 @property (nonatomic, strong) UILabel     *timeL;
 @property (nonatomic, strong) UILabel     *subL;
 @property (nonatomic, strong) UIView      *dataBox;
@@ -72,6 +73,15 @@
         _timeL.translatesAutoresizingMaskIntoConstraints = NO;
         [_card addSubview:_timeL];
 
+        _countL = [UILabel new];
+        _countL.textAlignment = NSTextAlignmentCenter;
+        _countL.layer.cornerRadius = 4;
+        _countL.layer.borderWidth = 1.0 / [UIScreen mainScreen].scale;
+        _countL.clipsToBounds = NO;
+        _countL.hidden = YES;
+        _countL.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_countL];
+
         _subL = [UILabel new];
         _subL.numberOfLines = 2;
         _subL.translatesAutoresizingMaskIntoConstraints = NO;
@@ -119,9 +129,14 @@
             [_timeL.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor constant:-12],
             [_timeL.centerYAnchor  constraintEqualToAnchor:_ico.centerYAnchor],
 
+            [_countL.trailingAnchor constraintEqualToAnchor:_timeL.leadingAnchor constant:-6],
+            [_countL.centerYAnchor constraintEqualToAnchor:_ico.centerYAnchor],
+            [_countL.heightAnchor constraintEqualToConstant:14],
+            [_countL.widthAnchor constraintGreaterThanOrEqualToConstant:24],
+
             [_titleL.leadingAnchor constraintEqualToAnchor:_algoL.trailingAnchor constant:6],
             [_titleL.centerYAnchor constraintEqualToAnchor:_ico.centerYAnchor],
-            [_titleL.trailingAnchor constraintLessThanOrEqualToAnchor:_timeL.leadingAnchor constant:-8],
+            [_titleL.trailingAnchor constraintLessThanOrEqualToAnchor:_countL.leadingAnchor constant:-6],
 
             [_subL.leadingAnchor  constraintEqualToAnchor:_ico.leadingAnchor],
             [_subL.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor constant:-12],
@@ -166,6 +181,19 @@
 
     self.titleL.attributedText = [CHTheme tracked:r.title
         font:[CHTheme mono:12.5 weight:UIFontWeightSemibold] color:CH_TEXT spacing:0.2];
+
+    // ★ 聚合次数角标
+    if (r.count > 1) {
+        self.countL.hidden = NO;
+        self.countL.attributedText = [CHTheme tracked:[NSString stringWithFormat:@"×%ld", (long)r.count]
+            font:[CHTheme mono:9.5 weight:UIFontWeightBold] color:CH_ACCENT spacing:0.4];
+        self.countL.layer.borderColor = [CH_ACCENT colorWithAlphaComponent:0.45].CGColor;
+        self.countL.backgroundColor = [CH_ACCENT colorWithAlphaComponent:0.12];
+        [CHTheme glow:self.countL color:CH_ACCENT radius:4 opacity:0.4];
+    } else {
+        self.countL.hidden = YES;
+        self.countL.layer.shadowOpacity = 0;
+    }
 
     self.subL.attributedText = [CHTheme tracked:(r.subtitle ?: @"")
         font:[CHTheme mono:10.5 weight:UIFontWeightRegular] color:CH_TEXT2 spacing:0.1];
@@ -381,7 +409,7 @@
 
 - (void)load {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray *r = [CHScanner recordsForApp:self.app limit:5000];
+        NSArray *r = [CHScanner recordsForApp:self.app limit:8000 aggregate:YES];
         dispatch_async(dispatch_get_main_queue(), ^{
             self.allRecords = r;
             [self applyFilter];
