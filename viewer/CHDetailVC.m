@@ -8,7 +8,7 @@
 @property (nonatomic, strong) UIView      *card;
 @property (nonatomic, strong) UIView      *bar;
 @property (nonatomic, strong) UIImageView *ico;
-@property (nonatomic, strong) UILabel     *tag;       // LAYER 标签
+@property (nonatomic, strong) UILabel     *tagL;       // LAYER 标签
 @property (nonatomic, strong) UILabel     *titleL;
 @property (nonatomic, strong) UILabel     *timeL;
 @property (nonatomic, strong) UILabel     *subL;
@@ -41,9 +41,9 @@
         _ico.translatesAutoresizingMaskIntoConstraints = NO;
         [_card addSubview:_ico];
 
-        _tag = [UILabel new];
-        _tag.translatesAutoresizingMaskIntoConstraints = NO;
-        [_card addSubview:_tag];
+        _tagL = [UILabel new];
+        _tagL.translatesAutoresizingMaskIntoConstraints = NO;
+        [_card addSubview:_tagL];
 
         _titleL = [UILabel new];
         _titleL.numberOfLines = 1;
@@ -91,13 +91,13 @@
             [_ico.widthAnchor constraintEqualToConstant:15],
             [_ico.heightAnchor constraintEqualToConstant:15],
 
-            [_tag.leadingAnchor constraintEqualToAnchor:_ico.trailingAnchor constant:7],
-            [_tag.centerYAnchor constraintEqualToAnchor:_ico.centerYAnchor],
+            [_tagL.leadingAnchor constraintEqualToAnchor:_ico.trailingAnchor constant:7],
+            [_tagL.centerYAnchor constraintEqualToAnchor:_ico.centerYAnchor],
 
             [_timeL.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor constant:-12],
             [_timeL.centerYAnchor constraintEqualToAnchor:_ico.centerYAnchor],
 
-            [_titleL.leadingAnchor constraintEqualToAnchor:_tag.trailingAnchor constant:8],
+            [_titleL.leadingAnchor constraintEqualToAnchor:_tagL.trailingAnchor constant:8],
             [_titleL.centerYAnchor constraintEqualToAnchor:_ico.centerYAnchor],
             [_titleL.trailingAnchor constraintLessThanOrEqualToAnchor:_timeL.leadingAnchor constant:-8],
 
@@ -128,7 +128,7 @@
     self.ico.image = [UIImage systemImageNamed:[CHTheme symbolForLayer:r.layer]];
     self.ico.tintColor = col;
 
-    self.tag.attributedText = [CHTheme tracked:[CHTheme nameForLayer:r.layer]
+    self.tagL.attributedText = [CHTheme tracked:[CHTheme nameForLayer:r.layer]
         font:[CHTheme mono:9 weight:UIFontWeightBold] color:col spacing:1.0];
 
     self.titleL.attributedText = [CHTheme tracked:r.title
