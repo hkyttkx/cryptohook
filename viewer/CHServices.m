@@ -2,9 +2,58 @@
 #import "CHServices.h"
 #import <objc/runtime.h>
 
+// 私有 API：拿 App 图标（越狱环境可用）
+@interface UIImage (CHPrivate)
++ (UIImage *)_applicationIconImageForBundleIdentifier:(NSString *)bid format:(int)fmt scale:(CGFloat)scale;
+@end
+
 @implementation CHScanner
 
-#pragma mark - App 枚举（LSApplicationWorkspace 私有 API）
+#pragma mark - 图标
++ (UIImage *)iconForBundlePath:(NSString *)bundlePath bid:(NSString *)bid {
+    // ① 常见图标文件名（覆盖绝大多数 App）
+    NSArray *names = @[
+        @"AppIcon60x60@3x.png", @"AppIcon60x60@2x.png",
+        @"AppIcon76x76@2x~ipad.png", @"AppIcon83.5x83.5@2x~ipad.png",
+        @"Icon-60@3x.png", @"Icon-60@2x.png",
+        @"Icon-76@2x.png", @"Icon-83.5@2x.png",
+        @"Icon@3x.png", @"Icon@2x.png", @"Icon.png",
+    ];
+    if (bundlePath.length) {
+        for (NSString *n in names) {
+            UIImage *img = [UIImage imageWithContentsOfFile:
+                            [bundlePath stringByAppendingPathComponent:n]];
+            if (img) return img;
+        }
+        // ② 从 Info.plist 的 CFBundleIcons 解析真实文件名
+        NSDictionary *pl = [NSDictionary dictionaryWithContentsOfFile:
+                            [bundlePath stringByAppendingPathComponent:@"Info.plist"]];
+        NSArray *cands = nil;
+        NSDictionary *primary = pl[@"CFBundleIcons"][@"CFBundlePrimaryIcon"];
+        if (primary[@"CFBundleIconFiles"]) cands = primary[@"CFBundleIconFiles"];
+        if (!cands && pl[@"CFBundleIconFiles"]) cands = pl[@"CFBundleIconFiles"];
+        if ([cands isKindOfClass:[NSArray class]]) {
+            for (NSString *base in [cands reverseObjectEnumerator]) {
+                for (NSString *sfx in @[@"@3x.png", @"@2x.png", @".png", @""]) {
+                    NSString *p = [bundlePath stringByAppendingPathComponent:
+                                   [base stringByAppendingString:sfx]];
+                    UIImage *img = [UIImage imageWithContentsOfFile:p];
+                    if (img) return img;
+                }
+            }
+        }
+    }
+    // ③ 私有 API 兜底
+    if (bid.length) {
+        @try {
+            UIImage *img = [UIImage _applicationIconImageForBundleIdentifier:bid format:2 scale:3.0];
+            if ([img isKindOfClass:[UIImage class]]) return img;
+        } @catch (__unused NSException *e) {}
+    }
+    return nil;
+}
+
+#pragma mark - App 枚举
 + (NSArray<CHApp *> *)allApps {
     NSMutableArray *out = [NSMutableArray array];
     NSMutableSet *seen = [NSMutableSet set];
@@ -15,7 +64,7 @@
         NSArray *all = [ws performSelector:@selector(allApplications)];
         for (id proxy in all) {
             @try {
-                NSString *bid  = [proxy performSelector:@selector(bundleIdentifier)];
+                NSString *bid = [proxy performSelector:@selector(bundleIdentifier)];
                 if (!bid || [seen containsObject:bid]) continue;
                 [seen addObject:bid];
 
@@ -26,19 +75,14 @@
                 a.bundlePath = burl.path;
                 NSURL *durl = [proxy performSelector:@selector(dataContainerURL)];
                 a.dataPath = durl.path;
-
-                // 图标（v2 variant）
-                id iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:@(2)];
-                if ([iconData isKindOfClass:[NSData class]])
-                    a.icon = [UIImage imageWithData:iconData];
-
+                a.icon = [self iconForBundlePath:a.bundlePath bid:bid];
                 a.recordCount = [self countForApp:a];
                 [out addObject:a];
             } @catch (NSException *e) {}
         }
     }
 
-    // 兜底：扫容器目录（拿不到 LSApplicationProxy 时）
+    // 兜底：扫容器
     if (out.count == 0) {
         NSFileManager *fm = [NSFileManager defaultManager];
         NSString *base = @"/var/containers/Bundle/Application";
@@ -47,8 +91,8 @@
             for (NSString *e in [fm contentsOfDirectoryAtPath:appDir error:nil]) {
                 if (![e hasSuffix:@".app"]) continue;
                 NSString *p = [appDir stringByAppendingPathComponent:e];
-                NSString *info = [p stringByAppendingPathComponent:@"Info.plist"];
-                NSDictionary *pl = [NSDictionary dictionaryWithContentsOfFile:info];
+                NSDictionary *pl = [NSDictionary dictionaryWithContentsOfFile:
+                                    [p stringByAppendingPathComponent:@"Info.plist"]];
                 NSString *bid = pl[@"CFBundleIdentifier"];
                 if (!bid || [seen containsObject:bid]) continue;
                 [seen addObject:bid];
@@ -56,15 +100,16 @@
                 a.bid = bid;
                 a.name = pl[@"CFBundleDisplayName"] ?: pl[@"CFBundleName"] ?: e;
                 a.bundlePath = p;
+                a.icon = [self iconForBundlePath:p bid:bid];
                 a.recordCount = [self countForApp:a];
                 [out addObject:a];
             }
         }
     }
 
-    // 排序：有记录的在前，然后按名字
     [out sortUsingComparator:^NSComparisonResult(CHApp *a, CHApp *b) {
-        if (a.recordCount != b.recordCount) return a.recordCount > b.recordCount ? NSOrderedAscending : NSOrderedDescending;
+        if (a.recordCount != b.recordCount)
+            return a.recordCount > b.recordCount ? NSOrderedAscending : NSOrderedDescending;
         return [a.name localizedCaseInsensitiveCompare:b.name];
     }];
     return out;
@@ -75,9 +120,7 @@
     NSInteger n = 0;
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *p in app.logFiles) {
-        NSDictionary *attr = [fm attributesOfItemAtPath:p error:nil];
-        NSNumber *sz = attr[NSFileSize];
-        // 粗估：平均每条 200B
+        NSNumber *sz = [fm attributesOfItemAtPath:p error:nil][NSFileSize];
         if (sz) n += MAX(1, sz.integerValue / 200);
     }
     return n;
@@ -88,7 +131,6 @@
     for (NSString *p in app.logFiles) {
         NSData *d = [NSData dataWithContentsOfFile:p];
         if (!d) continue;
-        // 逐行 JSON
         const uint8_t *bytes = d.bytes;
         NSUInteger len = d.length, start = 0;
         for (NSUInteger i = 0; i <= len; i++) {
@@ -102,7 +144,7 @@
                         r.t = [obj[@"t"] doubleValue];
                         r.date = [NSDate dateWithTimeIntervalSince1970:r.t];
                         r.layer = obj[@"layer"] ?: @"?";
-                        r.type = obj[@"type"] ?: @"?";
+                        r.type  = obj[@"type"]  ?: @"?";
                         [out addObject:r];
                     }
                 }
@@ -110,7 +152,6 @@
             }
         }
     }
-    // 时间倒序
     [out sortUsingComparator:^NSComparisonResult(CHRecord *a, CHRecord *b) {
         return a.t > b.t ? NSOrderedAscending : (a.t < b.t ? NSOrderedDescending : NSOrderedSame);
     }];
