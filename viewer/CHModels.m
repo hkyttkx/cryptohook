@@ -88,6 +88,23 @@
     return [parts componentsJoinedByString:@" · "];
 }
 
+- (NSString *)opTag {
+    NSString *t = self.type ?: @"";
+    NSString *op = self.raw[@"op"];
+    if (op.length) return op;                       // ENC / DEC
+    if ([t isEqualToString:@"CCHmac"])   return @"MAC";
+    if ([t isEqualToString:@"CC_SHA256"]) return @"HASH";
+    if ([t isEqualToString:@"HTTP.request"])  return @"REQ";
+    if ([t isEqualToString:@"HTTP.response"]) return @"RESP";
+    if ([t hasPrefix:@"SecKey"]) {
+        if ([t containsString:@"Decrypt"]) return @"DEC";
+        if ([t containsString:@"Encrypt"]) return @"ENC";
+        return @"ASYM";
+    }
+    if ([t isEqualToString:@"String"]) return @"TEXT";
+    return nil;
+}
+
 - (NSString *)algoTag {
     NSNumber *a = self.raw[@"alg"];
     NSInteger i = a ? a.integerValue : -1;
