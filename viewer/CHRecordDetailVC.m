@@ -3,24 +3,46 @@
 #import "CHTheme.h"
 
 #pragma mark - 工具：hex -> ASCII
-static NSString *hexToASCII(NSString *hex) {
+// ── 编码转换工具 ──
+static NSData *hexToData(NSString *hex) {
     if (![hex isKindOfClass:[NSString class]] || hex.length < 2) return nil;
     NSMutableString *clean = [NSMutableString string];
     for (NSUInteger i = 0; i < hex.length; i++) {
         unichar c = [hex characterAtIndex:i];
-        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
-            [clean appendFormat:@"%C", c];
-        else if (c == 0x2026) break;   // 遇到省略号停止
+        if ((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')) [clean appendFormat:@"%C", c];
+        else if (c == 0x2026) break;
     }
     if (clean.length < 2) return nil;
-    NSMutableString *out = [NSMutableString string];
+    NSMutableData *d = [NSMutableData dataWithCapacity:clean.length/2];
     for (NSUInteger i = 0; i + 1 < clean.length; i += 2) {
         unsigned int v = 0;
         [[NSScanner scannerWithString:[clean substringWithRange:NSMakeRange(i, 2)]] scanHexInt:&v];
-        unichar ch = (unichar)(v & 0xff);
-        [out appendFormat:@"%C", (ch >= 32 && ch < 127) ? ch : (unichar)0x00B7];  // 不可打印 -> ·
+        uint8_t b = (uint8_t)(v & 0xff);
+        [d appendBytes:&b length:1];
     }
-    return out;
+    return d;
+}
+static NSString *hexToBase64(NSString *hex) {
+    NSData *d = hexToData(hex);
+    return d.length ? [d base64EncodedStringWithOptions:0] : nil;
+}
+static NSString *hexToASCII(NSString *hex) {
+    NSData *d = hexToData(hex);
+    if (!d.length) return nil;
+    NSMutableString *o = [NSMutableString string];
+    const uint8_t *b = d.bytes;
+    for (NSUInteger i = 0; i < d.length; i++)
+        [o appendFormat:@"%C", (b[i]>=32 && b[i]<127) ? (unichar)b[i] : (unichar)0x00B7];
+    return o;
+}
+static NSString *textToHex(NSString *s) {
+    if (![s isKindOfClass:[NSString class]] || s.length == 0) return nil;
+    NSData *d = [s dataUsingEncoding:NSUTF8StringEncoding];
+    if (!d.length) return nil;
+    NSMutableString *o = [NSMutableString stringWithCapacity:d.length*2];
+    const uint8_t *b = d.bytes;
+    for (NSUInteger i = 0; i < d.length; i++) [o appendFormat:@"%02x", b[i]];
+    return o;
 }
 
 #pragma mark - 字段卡片
@@ -182,17 +204,31 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         if (s.length == 0) return;
         [stack addObject:[[CHFieldView alloc] initWithName:n value:s accent:accent]];
     };
-    void (^addData)(NSString *, NSString *) = ^(NSString *n, NSString *hex) {
+    // ★ 数据三编码：HEX / Base64 / 文本
+    void (^addData)(NSString *, NSString *, BOOL) = ^(NSString *n, NSString *hex, BOOL accent) {
         if (![hex isKindOfClass:[NSString class]] || hex.length < 2) return;
+        [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · HEX"]
+                                value:hex accent:accent]];
+        NSString *b64 = hexToBase64(hex);
+        if (b64.length) [stack addObject:[[CHFieldView alloc]
+                                initWithName:[n stringByAppendingString:@" · Base64"]
+                                value:b64 accent:accent]];
         NSString *asc = hexToASCII(hex);
-        if (asc.length) {
-            [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · ASCII"]
-                                    value:asc accent:NO]];
-            [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · HEX"]
-                                    value:hex accent:NO]];
-        } else {
-            [stack addObject:[[CHFieldView alloc] initWithName:n value:hex accent:NO]];
-        }
+        if (asc.length) [stack addObject:[[CHFieldView alloc]
+                                initWithName:[n stringByAppendingString:@" · 文本"]
+                                value:asc accent:accent]];
+    };
+    // 文本类字段：文本 / HEX / Base64
+    void (^addText)(NSString *, NSString *, BOOL) = ^(NSString *n, NSString *v, BOOL accent) {
+        if (![v isKindOfClass:[NSString class]] || v.length == 0) return;
+        [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · 文本"]
+                                value:v accent:accent]];
+        NSString *h = textToHex(v);
+        if (h.length) [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · HEX"]
+                                value:h accent:accent]];
+        NSData *d = [v dataUsingEncoding:NSUTF8StringEncoding];
+        if (d.length) [stack addObject:[[CHFieldView alloc] initWithName:[n stringByAppendingString:@" · Base64"]
+                                value:[d base64EncodedStringWithOptions:0] accent:accent]];
     };
 
     // ── ① 基础 ──
@@ -222,8 +258,8 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     BOOL hasKeyMat = (r[@"key"] || r[@"iv"]);
     if (hasKeyMat) {
         addRaw(makeSectionHeader(@"密钥材料", CH_ACCENT));
-        addField(@"KEY", r[@"key"], YES);
-        addField(@"IV",  r[@"iv"],  YES);
+        addData(@"KEY", r[@"key"], YES);
+        addData(@"IV",  r[@"iv"],  YES);
     }
 
     // ── ③ 原始数据（输入）──
@@ -232,10 +268,10 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     if (hasIn) {
         addRaw(makeSectionHeader(@"原始数据（输入 in）", CH_BLUE));
         NSString *plain = r[@"text"] ?: r[@"inText"];
-        if (plain) addField(@"明文", plain, NO);
-        addData(@"原始", r[@"in"]);
-        addData(@"请求体", r[@"reqText"] ? nil : r[@"req"]);
-        addData(@"数据", r[@"data"]);
+        if (plain) addText(@"明文", plain, NO);
+        addData(@"密文", r[@"in"], NO);
+        addData(@"请求体", r[@"reqText"] ? nil : r[@"req"], NO);
+        addData(@"数据", r[@"data"], NO);
         if (r[@"inLen"]) addField(@"输入长度", [NSString stringWithFormat:@"%@ 字节", r[@"inLen"]], NO);
     }
 
@@ -244,10 +280,10 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
     BOOL hasOut = (outPlain || r[@"out"] || r[@"mac"] || r[@"resp"]);
     if (hasOut) {
         addRaw(makeSectionHeader(@"结果数据（输出 out）", CH_ACCENT));
-        if (outPlain) addField(@"明文", outPlain, NO);
-        addData(@"结果", r[@"out"]);
-        addData(@"HMAC / MAC", r[@"mac"]);
-        addData(@"响应体", r[@"respText"] ? nil : r[@"resp"]);
+        if (outPlain) addText(@"明文", outPlain, NO);
+        addData(@"明文/结果", r[@"out"], NO);
+        addData(@"HMAC", r[@"mac"], NO);
+        addData(@"响应体", r[@"respText"] ? nil : r[@"resp"], NO);
         if (r[@"outLen"]) addField(@"输出长度", [NSString stringWithFormat:@"%@ 字节", r[@"outLen"]], NO);
     }
 
