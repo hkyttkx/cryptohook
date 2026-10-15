@@ -483,8 +483,98 @@ static UIView *makeSectionHeader(NSString *title, UIColor *col) {
         }
     }
 
+    // 有密文才能扫
+    NSString *cipher = r[@"in"] ?: r[@"out"];
+    if ([cipher isKindOfClass:[NSString class]] && cipher.length >= 64) {
+        [al addAction:[UIAlertAction actionWithTitle:@"扫描 AES Key（L4）"
+                              style:UIAlertActionStyleDefault
+                            handler:^(UIAlertAction *a){ [self startKeyScan]; }]];
+    }
+
     [al addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     if (al.popoverPresentationController) al.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    [self presentViewController:al animated:YES completion:nil];
+}
+
+#pragma mark - L4：密钥扫描
+- (void)startKeyScan {
+    NSDictionary *r = self.record.raw;
+    NSString *cipher = r[@"in"] ?: r[@"out"];
+    if (cipher.length < 64) return;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *dir = @"/var/mobile/Library/CryptoHook";
+    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    NSString *nonce = [NSString stringWithFormat:@"%.0f", [NSDate date].timeIntervalSince1970 * 1000];
+    NSDictionary *req = @{
+        @"cipherHex": cipher,
+        @"nonce": nonce,
+        @"t": @([NSDate date].timeIntervalSince1970),
+        @"algs": @[@(0), @(5)]     // 0=AES, 5=RC4 都试
+    };
+    NSString *reqPath = [dir stringByAppendingPathComponent:@"scan_request.plist"];
+    NSString *resPath = [dir stringByAppendingPathComponent:@"scan_result.plist"];
+    [fm removeItemAtPath:resPath error:nil];
+    [req writeToFile:reqPath atomically:YES];
+
+    // 转圈提示
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"扫描中…"
+        message:@"正在目标进程内存里暴力搜索密钥\n（几百 MB，约 5~30 秒）"
+        preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:wait animated:YES completion:nil];
+
+    // 轮询结果（最多 60 秒）
+    __block NSInteger tries = 0;
+    __block void (^poll)(void);
+    poll = ^{
+        tries++;
+        NSDictionary *res = [NSDictionary dictionaryWithContentsOfFile:resPath];
+        if (res && [res[@"done"] boolValue]) {
+            [wait dismissViewControllerAnimated:YES completion:^{
+                [self showScanResult:res];
+            }];
+            return;
+        }
+        if (tries > 60) {
+            [wait dismissViewControllerAnimated:YES completion:^{
+                UIAlertController *al = [UIAlertController alertControllerWithTitle:@"扫描超时"
+                    message:@"目标 App 可能没在运行，或者 dylib 没收到请求。\n请确认目标 App 在前台。"
+                    preferredStyle:UIAlertControllerStyleAlert];
+                [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:al animated:YES completion:nil];
+            }];
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0*NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), poll);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5*NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), poll);
+}
+
+- (void)showScanResult:(NSDictionary *)res {
+    NSArray *found = res[@"results"];
+    NSInteger mb = [res[@"scannedMB"] integerValue];
+    NSMutableString *m = [NSMutableString string];
+    [m appendFormat:@"扫描 %ld MB\n命中 %lu 条\n\n", (long)mb, (unsigned long)found.count];
+    if (found.count == 0) {
+        [m appendString:@"没找到能解开这段密文的 key。\n\n可能：\n• 算法不是 AES-CBC\n• 密文被二次编码\n• 目标 App 已退出"];
+    } else {
+        for (NSDictionary *f in found) {
+            [m appendFormat:@"KEY(%@) %@\n", f[@"keyLen"], f[@"key"]];
+            [m appendFormat:@"地址 %@\n", f[@"addr"]];
+            if ([f[@"plainText"] length]) [m appendFormat:@"明文 %@\n", f[@"plainText"]];
+            [m appendString:@"\n"];
+        }
+    }
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"扫描结果"
+        message:m preferredStyle:UIAlertControllerStyleAlert];
+    [al addAction:[UIAlertAction actionWithTitle:@"复制结果"
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        [[UIPasteboard generalPasteboard] setString:m];
+    }]];
+    [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:al animated:YES completion:nil];
 }
 
